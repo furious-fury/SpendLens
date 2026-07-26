@@ -452,6 +452,27 @@ const TransactionCounterpartySummarySchema = z.object({
   displayName: z.string(),
 });
 
+export const ClassificationEvidenceSchema = z.object({
+  code: z.string(),
+  label: z.string(),
+  source: z.enum(["manual", "transfer", "rule", "counterparty", "bank", "history", "fallback"]),
+  ruleId: z.string().uuid().nullable().optional(),
+});
+export type ClassificationEvidence = z.infer<typeof ClassificationEvidenceSchema>;
+
+const TransactionClassificationRuleSummarySchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+});
+
+const TransactionClassificationDecisionSchema = z.object({
+  winnerRule: TransactionClassificationRuleSummarySchema.nullable(),
+  matchedRules: z.array(TransactionClassificationRuleSummarySchema),
+  suppressedRules: z.array(TransactionClassificationRuleSummarySchema),
+  conflictRules: z.array(TransactionClassificationRuleSummarySchema),
+  evidence: z.array(ClassificationEvidenceSchema),
+});
+
 export const TransactionSplitSchema = z.object({
   id: z.string().uuid(),
   amountMinor: z.number().int().positive(),
@@ -487,6 +508,7 @@ export const TransactionSchema = z.object({
   confidence: TransactionConfidenceSchema,
   confidenceBasisPoints: z.number().int().min(0).max(10_000).nullable(),
   classificationExplanation: z.string().nullable(),
+  classificationDecision: TransactionClassificationDecisionSchema.nullable(),
   reviewState: TransactionReviewStateSchema,
   note: z.string().nullable(),
   splits: z.array(TransactionSplitSchema),
@@ -711,6 +733,240 @@ export const ConfirmTransferSchema = z.object({
   pairedTransactionId: z.string().uuid(),
 });
 
+export const ClassificationRuleKindSchema = z.enum(["exact", "pattern", "counterparty", "bank"]);
+export type ClassificationRuleKind = z.infer<typeof ClassificationRuleKindSchema>;
+
+export const ClassificationFieldSchema = z.enum([
+  "narration",
+  "direction",
+  "amount_minor",
+  "currency",
+  "account_id",
+  "institution_name",
+  "counterparty_id",
+  "transaction_type",
+  "scope",
+]);
+export type ClassificationField = z.infer<typeof ClassificationFieldSchema>;
+
+const ClassificationStringConditionSchema = z.object({
+  field: ClassificationFieldSchema,
+  operator: z.enum(["equals", "contains", "starts_with", "ends_with", "pattern"]),
+  value: z.string().trim().min(1).max(200),
+});
+
+const ClassificationOneOfConditionSchema = z.object({
+  field: ClassificationFieldSchema,
+  operator: z.literal("one_of"),
+  values: z
+    .array(z.union([z.string().trim().min(1).max(200), z.number().int()]))
+    .min(1)
+    .max(50),
+});
+
+const ClassificationComparisonConditionSchema = z.object({
+  field: z.literal("amount_minor"),
+  operator: z.enum(["greater_than", "greater_than_or_equal", "less_than", "less_than_or_equal"]),
+  value: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+});
+
+const ClassificationAmountRangeConditionSchema = z
+  .object({
+    field: z.literal("amount_minor"),
+    operator: z.literal("amount_range"),
+    minimum: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+    maximum: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  })
+  .refine(
+    ({ minimum, maximum }) =>
+      (minimum !== undefined || maximum !== undefined) &&
+      (minimum === undefined || maximum === undefined || minimum <= maximum),
+    "Provide a valid amount range.",
+  );
+
+export const ClassificationConditionSchema = z.discriminatedUnion("operator", [
+  ClassificationStringConditionSchema,
+  ClassificationOneOfConditionSchema,
+  ClassificationComparisonConditionSchema,
+  ClassificationAmountRangeConditionSchema,
+]);
+export type ClassificationCondition = z.infer<typeof ClassificationConditionSchema>;
+
+const ClassificationActionObjectSchema = z.object({
+  categoryId: CategoryIdSchema.optional(),
+  counterpartyId: z.string().uuid().optional(),
+  transactionType: TransactionTypeSchema.optional(),
+  scope: TransactionScopeSchema.optional(),
+});
+
+export const ClassificationActionSchema = ClassificationActionObjectSchema.refine(
+  (value) => Object.keys(value).length > 0,
+  "Choose at least one classification action.",
+);
+export type ClassificationAction = z.infer<typeof ClassificationActionSchema>;
+
+export const ClassificationRuleDraftSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  kind: ClassificationRuleKindSchema,
+  conditions: z.array(ClassificationConditionSchema).min(1).max(20),
+  action: ClassificationActionSchema,
+  priority: z.number().int().min(-1000).max(1000).default(0),
+  enabled: z.boolean().default(true),
+});
+export type ClassificationRuleDraft = z.infer<typeof ClassificationRuleDraftSchema>;
+
+export const CreateClassificationRuleSchema = ClassificationRuleDraftSchema;
+export type CreateClassificationRule = z.infer<typeof CreateClassificationRuleSchema>;
+
+export const UpdateClassificationRuleSchema = ClassificationRuleDraftSchema.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  "Provide at least one rule change.",
+);
+export type UpdateClassificationRule = z.infer<typeof UpdateClassificationRuleSchema>;
+
+export const ReorderClassificationRulesSchema = z.object({
+  ruleIds: z.array(z.string().uuid()).max(500),
+});
+export type ReorderClassificationRules = z.infer<typeof ReorderClassificationRulesSchema>;
+
+export const ClassificationRuleSchema = ClassificationRuleDraftSchema.extend({
+  id: z.string().uuid(),
+  specificity: z.number().int().nonnegative(),
+  matchCount: z.number().int().nonnegative(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type ClassificationRule = z.infer<typeof ClassificationRuleSchema>;
+
+export const ClassificationRuleListSchema = z.object({
+  items: z.array(ClassificationRuleSchema),
+});
+
+export const ClassificationSuggestionSchema = ClassificationActionObjectSchema.partial().extend({
+  categoryId: CategoryIdSchema.nullable().optional(),
+  counterpartyId: z.string().uuid().nullable().optional(),
+});
+export type ClassificationSuggestion = z.infer<typeof ClassificationSuggestionSchema>;
+
+export const ClassificationEvaluationSchema = z.object({
+  transactionId: z.string().uuid(),
+  source: z.enum(["manual", "transfer", "rule", "counterparty", "bank", "history", "unclassified"]),
+  confidence: TransactionConfidenceSchema,
+  suggestion: ClassificationSuggestionSchema.nullable(),
+  winnerRuleId: z.string().uuid().nullable(),
+  matchedRuleIds: z.array(z.string().uuid()),
+  suppressedRuleIds: z.array(z.string().uuid()),
+  conflictRuleIds: z.array(z.string().uuid()),
+  evidence: z.array(ClassificationEvidenceSchema),
+  needsReview: z.boolean(),
+});
+export type ClassificationEvaluation = z.infer<typeof ClassificationEvaluationSchema>;
+
+export const ClassificationPreviewRequestSchema = ClassificationRuleDraftSchema.extend({
+  ruleId: z.string().uuid().optional(),
+});
+export type ClassificationPreviewRequest = z.infer<typeof ClassificationPreviewRequestSchema>;
+
+export const ClassificationPreviewItemSchema = z.object({
+  transactionId: z.string().uuid(),
+  narration: z.string(),
+  occurredAt: z.string().datetime(),
+  amountMinor: z.number().int().positive(),
+  currency: z.string().length(3),
+  direction: TransactionDirectionSchema,
+  current: ClassificationSuggestionSchema,
+  proposed: ClassificationSuggestionSchema,
+  wouldChange: z.boolean(),
+});
+
+export const ClassificationPreviewSchema = z.object({
+  matchCount: z.number().int().nonnegative(),
+  changeCount: z.number().int().nonnegative(),
+  items: z.array(ClassificationPreviewItemSchema),
+});
+export type ClassificationPreview = z.infer<typeof ClassificationPreviewSchema>;
+
+export const ReviewGroupTransactionSchema = z.object({
+  id: z.string().uuid(),
+  occurredAt: z.string().datetime(),
+  narration: z.string(),
+  amountMinor: z.number().int().positive(),
+  currency: z.string().length(3),
+  direction: TransactionDirectionSchema,
+  accountName: z.string(),
+  categoryName: z.string().nullable(),
+  reviewState: TransactionReviewStateSchema,
+});
+
+export const ReviewGroupSchema = z.object({
+  key: z.string().min(1),
+  label: z.string(),
+  basis: z.enum(["counterparty", "narration", "conflict", "unclassified"]),
+  transactionCount: z.number().int().positive(),
+  totals: z.array(
+    z.object({
+      currency: z.string().length(3),
+      debitMinor: z.number().int().nonnegative(),
+      creditMinor: z.number().int().nonnegative(),
+    }),
+  ),
+  confidence: TransactionConfidenceSchema,
+  suggestion: ClassificationSuggestionSchema.nullable(),
+  evidence: z.array(ClassificationEvidenceSchema),
+  hasConflict: z.boolean(),
+  transactions: z.array(ReviewGroupTransactionSchema),
+});
+export type ReviewGroup = z.infer<typeof ReviewGroupSchema>;
+
+export const ReviewGroupListSchema = z.object({
+  items: z.array(ReviewGroupSchema),
+  totalTransactions: z.number().int().nonnegative(),
+});
+
+export const ReviewApplyScopeSchema = z.enum(["selected", "existing_matches", "future_matches"]);
+export type ReviewApplyScope = z.infer<typeof ReviewApplyScopeSchema>;
+
+export const ApplyReviewDecisionSchema = z
+  .object({
+    groupKey: z.string().min(1).max(500),
+    transactionIds: z.array(z.string().uuid()).max(500).optional(),
+    decision: z.enum(["accept", "change", "ignore"]),
+    applyScope: ReviewApplyScopeSchema,
+    action: ClassificationActionSchema.optional(),
+    rememberForFuture: z.boolean().default(true),
+    ruleName: z.string().trim().min(1).max(120).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.decision === "change" && !value.action) {
+      context.addIssue({
+        code: "custom",
+        path: ["action"],
+        message: "Choose the classification to apply.",
+      });
+    }
+    if (value.applyScope === "selected" && !value.transactionIds?.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["transactionIds"],
+        message: "Select at least one transaction.",
+      });
+    }
+  });
+export type ApplyReviewDecision = z.infer<typeof ApplyReviewDecisionSchema>;
+
+export const ReviewDecisionResultSchema = z.object({
+  actionId: z.string().uuid(),
+  affectedCount: z.number().int().nonnegative(),
+  createdRule: ClassificationRuleSchema.nullable(),
+});
+export type ReviewDecisionResult = z.infer<typeof ReviewDecisionResultSchema>;
+
+export const UndoReviewDecisionResultSchema = z.object({
+  actionId: z.string().uuid(),
+  restoredCount: z.number().int().nonnegative(),
+});
+export type UndoReviewDecisionResult = z.infer<typeof UndoReviewDecisionResultSchema>;
+
 export const apiPaths = {
   live: "/health/live",
   ready: "/health/ready",
@@ -745,4 +1001,11 @@ export const apiPaths = {
   mergeCategory: (categoryId: string) => `/api/categories/${categoryId}/merge`,
   counterparties: "/api/counterparties",
   counterparty: (counterpartyId: string) => `/api/counterparties/${counterpartyId}`,
+  classificationRules: "/api/classification/rules",
+  classificationRule: (ruleId: string) => `/api/classification/rules/${ruleId}`,
+  classificationRulePreview: "/api/classification/rules/preview",
+  classificationRuleReorder: "/api/classification/rules/reorder",
+  reviewGroups: "/api/classification/review",
+  reviewDecisions: "/api/classification/review/decisions",
+  undoReviewDecision: (actionId: string) => `/api/classification/review/decisions/${actionId}/undo`,
 } as const;

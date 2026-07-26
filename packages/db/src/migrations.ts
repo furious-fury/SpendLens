@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { apiInfrastructureMigrationSql } from "./api-infrastructure-migration.js";
+import { classificationMigrationSql } from "./classification-migration.js";
 import { financialDomainMigrationSql } from "./financial-domain-migration.js";
 import { importPreviewMigrationSql } from "./import-preview-migration.js";
 import { importReconciliationMigrationSql } from "./import-reconciliation-migration.js";
@@ -98,6 +99,10 @@ const migrations: Migration[] = [
   {
     id: "0005_transaction_workspace",
     sql: transactionWorkspaceMigrationSql,
+  },
+  {
+    id: "0006_classification_rules_review",
+    sql: classificationMigrationSql,
   },
 ];
 

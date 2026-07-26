@@ -1,23 +1,23 @@
 import {
+  ArrowLineDown,
+  ArrowLineUp,
+  ArrowsLeftRight,
+  Brain,
+  FileArrowDown,
+  Receipt,
+} from "@phosphor-icons/react";
+import {
   createRootRoute,
   createRoute,
   createRouter,
   type ErrorComponentProps,
 } from "@tanstack/react-router";
-import {
-  ArrowLineDown,
-  ArrowLineUp,
-  ArrowsLeftRight,
-  BookOpenText,
-  Brain,
-  FileArrowDown,
-  Receipt,
-  SlidersHorizontal,
-} from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { AccountsPage } from "@/pages/accounts-page";
 import { OverviewPage } from "@/pages/overview-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
+import { ReviewPage } from "@/pages/review-page";
+import { RulesPage } from "@/pages/rules-page";
 import { SecuritySettingsPage } from "@/pages/security-settings-page";
 import { parseTransactionSearch, TransactionsPage } from "@/pages/transactions-page";
 
@@ -71,15 +71,22 @@ const accountsRoute = createRoute({
   component: AccountsPage,
 });
 
+const reviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/review",
+  component: ReviewPage,
+});
+
+const rulesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/rules",
+  component: RulesPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   transactionsRoute,
-  placeholder(
-    "/review",
-    "Review uncertain activity",
-    "Clarify suggested categories, resolve duplicates, and teach SpendLens what to remember.",
-    BookOpenText,
-  ),
+  reviewRoute,
   placeholder(
     "/spending",
     "Understand your spending",
@@ -110,12 +117,7 @@ const routeTree = rootRoute.addChildren([
     "Upload a PalmPay PDF, preview detected transactions, and confirm the import safely.",
     FileArrowDown,
   ),
-  placeholder(
-    "/rules",
-    "Manage remembered decisions",
-    "Inspect, prioritize, disable, and update the rules behind automatic classifications.",
-    SlidersHorizontal,
-  ),
+  rulesRoute,
   accountsRoute,
   settingsRoute,
 ]);

@@ -9,6 +9,7 @@ import {
 import {
   ImportReconciliationError,
   type AuditLog,
+  type ClassificationEngine,
   type ImportDeduplicationSummary,
   type ImportReconciliationStore,
   type StoredImportPreview,
@@ -24,6 +25,7 @@ import { receiveSecurePdf } from "./secure-upload.js";
 export interface ImportRoutesOptions {
   previews: ImportPreviewService;
   reconciler: ImportReconciliationStore;
+  classification?: ClassificationEngine;
   audit: AuditLog;
   temporaryRoot?: string;
 }
@@ -300,6 +302,7 @@ export function createImportRoutes(options: ImportRoutesOptions): OpenAPIHono<Ap
             },
           }),
       );
+      options.classification?.classifyWorkspace(session.workspaceId, true);
       return context.json(reconciliationResponse(summary), 200);
     } catch (error) {
       throw mapReconciliationError(error);

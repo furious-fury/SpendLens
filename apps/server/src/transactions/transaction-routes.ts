@@ -726,6 +726,7 @@ function auditMutation(audit: AuditLog, context: Context<AppEnv>) {
       action: mutation.action,
       ...(mutation.beforeState === undefined ? {} : { beforeState: mutation.beforeState }),
       ...(mutation.afterState === undefined ? {} : { afterState: mutation.afterState }),
+      ...(mutation.relatedRuleId === undefined ? {} : { relatedRuleId: mutation.relatedRuleId }),
       requestId: context.get("requestId"),
     });
   };

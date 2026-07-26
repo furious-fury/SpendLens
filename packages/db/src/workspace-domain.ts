@@ -31,6 +31,7 @@ export interface WorkspaceMutation {
   action: string;
   beforeState?: unknown;
   afterState?: unknown;
+  relatedRuleId?: string;
 }
 
 export type WorkspaceMutationHook = (mutation: WorkspaceMutation) => void;
