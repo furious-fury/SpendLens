@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { fallbackTransactionFingerprint, normalizeNarration } from "./transaction-identity.js";
+import { invalidateMetrics } from "./workspace-domain.js";
 
 export type ImportMatchClassification = "new" | "duplicate" | "possible_duplicate" | "conflict";
 export type ImportMatchDecision = "pending" | "confirmed" | "rejected" | "skipped";
@@ -388,6 +389,12 @@ export class ImportReconciliationStore {
            WHERE import_batch_id = ?`,
         )
         .run(accountId, created, linked, skipped, now, now, batch.id);
+      if (created > 0 || linked > 0) {
+        invalidateMetrics(sqlite, {
+          workspaceId: input.workspaceId,
+          reason: "import.committed",
+        });
+      }
 
       const committedBatch = this.#batch(input.workspaceId, input.importId);
       const summary = this.#summary(committedBatch);

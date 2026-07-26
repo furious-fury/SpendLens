@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { aiProviderMigrationSql } from "./ai-provider-migration.js";
+import { analyticsMigrationSql } from "./analytics-migration.js";
 import { apiInfrastructureMigrationSql } from "./api-infrastructure-migration.js";
 import { classificationMigrationSql } from "./classification-migration.js";
 import { financialDomainMigrationSql } from "./financial-domain-migration.js";
@@ -108,6 +109,10 @@ const migrations: Migration[] = [
   {
     id: "0007_ai_providers_privacy",
     sql: aiProviderMigrationSql,
+  },
+  {
+    id: "0008_analytics_metric_engine",
+    sql: analyticsMigrationSql,
   },
 ];
 

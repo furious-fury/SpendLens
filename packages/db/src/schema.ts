@@ -577,6 +577,47 @@ export const metricInvalidations = sqliteTable(
   ],
 );
 
+export const analyticsMetricCache = sqliteTable(
+  "analytics_metric_cache",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    queryHash: text("query_hash").notNull(),
+    startAt: integer("start_at", { mode: "timestamp_ms" }).notNull(),
+    endAt: integer("end_at", { mode: "timestamp_ms" }).notNull(),
+    currency: text("currency").notNull(),
+    accountIds: text("account_ids").notNull(),
+    scopes: text("scopes").notNull(),
+    response: text("response").notNull(),
+    calculatedAt: integer("calculated_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("analytics_metric_cache_workspace_query_unique").on(
+      table.workspaceId,
+      table.queryHash,
+    ),
+    index("analytics_metric_cache_workspace_range_idx").on(
+      table.workspaceId,
+      table.startAt,
+      table.endAt,
+    ),
+    check("analytics_metric_cache_range_check", sql`${table.startAt} < ${table.endAt}`),
+    check(
+      "analytics_metric_cache_hash_check",
+      sql`length(${table.queryHash}) = 64
+          AND ${table.queryHash} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+    check("analytics_metric_cache_currency_check", currencyCheck(table.currency)),
+    check("analytics_metric_cache_accounts_check", sql`json_valid(${table.accountIds})`),
+    check("analytics_metric_cache_scopes_check", sql`json_valid(${table.scopes})`),
+    check("analytics_metric_cache_response_check", sql`json_valid(${table.response})`),
+  ],
+);
+
 export const transactionNotes = sqliteTable(
   "transaction_notes",
   {
@@ -1077,6 +1118,7 @@ export const financialSchema = {
   transactionSplitSets,
   transactionSplits,
   metricInvalidations,
+  analyticsMetricCache,
   transactionNotes,
   tags,
   transactionTags,

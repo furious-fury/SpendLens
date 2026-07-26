@@ -2,6 +2,7 @@ import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
 import { apiPaths, type ServiceHealth, ServiceHealthSchema } from "@spendlens/contracts";
 import {
   AiProviderStore,
+  AnalyticsEngine,
   AuditLog,
   ClassificationEngine,
   ClassificationReview,
@@ -14,6 +15,7 @@ import {
 import { secureHeaders } from "hono/secure-headers";
 import { AiClassificationService } from "./ai/ai-classification-service.js";
 import { createAiRoutes } from "./ai/ai-routes.js";
+import { createAnalyticsRoutes } from "./analytics/analytics-routes.js";
 import { AppError } from "./api/app-error.js";
 import { createErrorHandler } from "./api/error-handler.js";
 import { createInfrastructureRoutes } from "./api/infrastructure-routes.js";
@@ -55,6 +57,7 @@ export interface CreateAppOptions {
   classificationReview?: ClassificationReview;
   aiProviders?: AiProviderStore;
   aiClassification?: AiClassificationService;
+  analytics?: AnalyticsEngine;
   importTemporaryRoot?: string;
   logger?: OperationalLogger;
 }
@@ -153,6 +156,7 @@ export function createApp(options: CreateAppOptions = {}) {
         providers: aiProviders,
         transactions,
       });
+    const analytics = options.analytics ?? new AnalyticsEngine(sqlite);
     security.registerDatabaseRekeyHook((previousKey, nextKey) =>
       aiProviders.rotateEncryptionKey(previousKey, nextKey),
     );
@@ -201,6 +205,7 @@ export function createApp(options: CreateAppOptions = {}) {
         audit,
       }),
     );
+    app.route("/", createAnalyticsRoutes(analytics));
     app.openAPIRegistry.registerComponent("securitySchemes", "sessionCookie", {
       type: "apiKey",
       in: "cookie",
