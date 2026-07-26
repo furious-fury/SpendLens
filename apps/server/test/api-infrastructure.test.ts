@@ -1,6 +1,12 @@
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { apiPaths, ApiErrorSchema, ImportProgressSchema, JobSchema } from "@spendlens/contracts";
+import {
+  apiPaths,
+  ApiErrorSchema,
+  ImportPreviewSchema,
+  ImportProgressSchema,
+  JobSchema,
+} from "@spendlens/contracts";
 import { AuditLog, JobQueue, MemoryKeyProvider } from "@spendlens/db";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
@@ -9,6 +15,7 @@ import { createJsonLogger } from "../src/api/operational-logger.js";
 import { JobWorker } from "../src/jobs/job-worker.js";
 import { CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE } from "../src/security/security-routes.js";
 import { SecurityService } from "../src/security/security-service.js";
+import { createSanitizedPalmPayPdf } from "./palmpay-fixture.js";
 
 const temporaryPaths: string[] = [];
 
@@ -31,6 +38,7 @@ describe("OpenAPI and structured API behavior", () => {
     expect(document.openapi).toBe("3.1.0");
     expect(document.paths).toHaveProperty("/api/security/login");
     expect(document.paths).toHaveProperty("/api/jobs/{jobId}");
+    expect(document.paths).toHaveProperty("/api/imports/previews");
     expect(document.paths).toHaveProperty("/api/imports/{importId}/progress");
 
     const invalid = await fixture.app.request("/api/jobs/not-a-uuid", {
@@ -42,6 +50,43 @@ describe("OpenAPI and structured API behavior", () => {
       family: "validation",
       requestId: expect.any(String),
     });
+    fixture.close();
+  });
+
+  it("creates an authenticated PalmPay preview without retaining the source PDF", async () => {
+    const logLines: string[] = [];
+    const fixture = await initializedFixture(createJsonLogger((line) => logLines.push(line)));
+    const bytes = await createSanitizedPalmPayPdf();
+    const headers = fixture.authHeaders(true);
+    headers.set("content-type", "application/pdf");
+    headers.set("x-spendlens-filename", "sanitized.pdf");
+    const response = await fixture.app.request(apiPaths.importPreviews, {
+      method: "POST",
+      headers,
+      body: bytes,
+    });
+    const preview = ImportPreviewSchema.parse(await response.json());
+
+    expect(response.status).toBe(201);
+    expect(preview).toMatchObject({
+      institution: "PalmPay",
+      transactionCount: 2,
+      reconciliation: { status: "matched" },
+      requiresConfirmation: false,
+    });
+    expect(
+      fixture.audit.listForEntity(fixture.workspaceId, "import_batch", preview.id),
+    ).toHaveLength(1);
+    expect(
+      (await readdir(fixture.directory)).filter((name) => name.startsWith("spendlens-upload-")),
+    ).toEqual([]);
+    expect(logLines.join("\n")).not.toContain("Example Store");
+    expect(logLines.join("\n")).not.toContain("fixture-debit-002");
+
+    const stored = await fixture.app.request(apiPaths.importPreview(preview.id), {
+      headers: fixture.authHeaders(),
+    });
+    expect(ImportPreviewSchema.parse(await stored.json())).toEqual(preview);
     fixture.close();
   });
 
@@ -284,7 +329,13 @@ async function initializedFixture(logger = createJsonLogger(() => undefined)) {
   };
   const jobs = new JobQueue(sqlite);
   const audit = new AuditLog(sqlite);
-  const app = createApp({ security, jobs, audit, logger });
+  const app = createApp({
+    security,
+    jobs,
+    audit,
+    logger,
+    importTemporaryRoot: directory,
+  });
   const importId = crypto.randomUUID();
 
   return {
@@ -294,6 +345,7 @@ async function initializedFixture(logger = createJsonLogger(() => undefined)) {
     audit,
     logger,
     sqlite,
+    directory,
     workspaceId: workspace.id,
     userId: credentials.user.id,
     importId,

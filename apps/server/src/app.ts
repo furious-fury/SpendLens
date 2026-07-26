@@ -1,5 +1,5 @@
 import { apiPaths, ServiceHealthSchema, type ServiceHealth } from "@spendlens/contracts";
-import { AuditLog, JobQueue } from "@spendlens/db";
+import { AuditLog, ImportPreviewStore, JobQueue } from "@spendlens/db";
 import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
 import { secureHeaders } from "hono/secure-headers";
 import { AppError } from "./api/app-error.js";
@@ -11,6 +11,8 @@ import {
   requestTelemetry,
 } from "./api/operational-logger.js";
 import type { AppEnv } from "./api/request-context.js";
+import { createImportRoutes } from "./imports/import-routes.js";
+import { ImportPreviewService } from "./imports/import-service.js";
 import { createSecurityRoutes, requireApiAuthentication } from "./security/security-routes.js";
 import { registerSecurityOpenApi } from "./security/security-openapi.js";
 import type { SecurityService } from "./security/security-service.js";
@@ -31,6 +33,8 @@ export interface CreateAppOptions {
   secureCookies?: boolean;
   jobs?: JobQueue;
   audit?: AuditLog;
+  importPreviews?: ImportPreviewService;
+  importTemporaryRoot?: string;
   logger?: OperationalLogger;
 }
 
@@ -105,6 +109,8 @@ export function createApp(options: CreateAppOptions = {}) {
     };
     const jobs = options.jobs ?? new JobQueue(sqlite);
     const audit = options.audit ?? new AuditLog(sqlite);
+    const importPreviews =
+      options.importPreviews ?? new ImportPreviewService(new ImportPreviewStore(sqlite));
 
     app.use("/api/*", requireApiAuthentication(security));
     app.route(
@@ -115,6 +121,14 @@ export function createApp(options: CreateAppOptions = {}) {
       }),
     );
     app.route("/", createInfrastructureRoutes({ jobs, audit, sqlite }));
+    app.route(
+      "/",
+      createImportRoutes({
+        previews: importPreviews,
+        audit,
+        ...(options.importTemporaryRoot ? { temporaryRoot: options.importTemporaryRoot } : {}),
+      }),
+    );
     app.openAPIRegistry.registerComponent("securitySchemes", "sessionCookie", {
       type: "apiKey",
       in: "cookie",
