@@ -3,14 +3,13 @@ import {
   ChangePasswordRequestSchema,
   LoginRequestSchema,
   RekeyRequestSchema,
-  SecurityErrorSchema,
   SetupCompleteRequestSchema,
   SetupRequestSchema,
 } from "@spendlens/contracts";
 import { getCookie, setCookie } from "hono/cookie";
-import { type Context, Hono } from "hono";
+import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
-import type { ContentfulStatusCode } from "hono/utils/http-status";
+import type { AppEnv } from "../api/request-context.js";
 import { SecurityError } from "./security-error.js";
 import type { SecurityService, SessionCredentials } from "./security-service.js";
 
@@ -29,9 +28,10 @@ const publicSecurityPaths = new Set<string>([
   apiPaths.setup,
   apiPaths.setupComplete,
   apiPaths.login,
+  apiPaths.openApi,
 ]);
 
-export function requireApiAuthentication(security: SecurityService): MiddlewareHandler {
+export function requireApiAuthentication(security: SecurityService): MiddlewareHandler<AppEnv> {
   return async (context, next) => {
     if (publicSecurityPaths.has(context.req.path)) {
       await next();
@@ -39,6 +39,7 @@ export function requireApiAuthentication(security: SecurityService): MiddlewareH
     }
 
     const session = security.authenticate(getCookie(context, SESSION_COOKIE));
+    context.set("session", session);
     if (!["GET", "HEAD", "OPTIONS"].includes(context.req.method)) {
       security.verifyCsrf(
         session,
@@ -50,8 +51,8 @@ export function requireApiAuthentication(security: SecurityService): MiddlewareH
   };
 }
 
-export function createSecurityRoutes(options: SecurityRoutesOptions): Hono {
-  const routes = new Hono();
+export function createSecurityRoutes(options: SecurityRoutesOptions): Hono<AppEnv> {
+  const routes = new Hono<AppEnv>();
   const remoteAddress = options.resolveRemoteAddress ?? (() => "local");
 
   routes.use("*", async (context, next) => {
@@ -133,34 +134,7 @@ export function createSecurityRoutes(options: SecurityRoutesOptions): Hono {
     return context.json({ recoveryKit });
   });
 
-  routes.onError(securityErrorResponse);
-
   return routes;
-}
-
-export function securityErrorResponse(error: Error, context: Context) {
-  const securityError =
-    error instanceof SecurityError
-      ? error
-      : new SecurityError(
-          "SECURITY_OPERATION_FAILED",
-          "The security operation could not be completed.",
-          500,
-        );
-
-  if (securityError.retryAfterSeconds) {
-    context.header("Retry-After", securityError.retryAfterSeconds.toString());
-  }
-
-  const body = SecurityErrorSchema.parse({
-    error: {
-      code: securityError.code,
-      message: securityError.message,
-      retryAfterSeconds: securityError.retryAfterSeconds,
-      fields: securityError.fields,
-    },
-  });
-  return context.json(body, securityError.status as ContentfulStatusCode);
 }
 
 function authenticatedMutation(request: Request, security: SecurityService) {

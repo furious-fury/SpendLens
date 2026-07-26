@@ -138,16 +138,129 @@ export const SecuritySessionSchema = z.object({
 
 export type SecuritySession = z.infer<typeof SecuritySessionSchema>;
 
-export const SecurityErrorSchema = z.object({
+export const ErrorFamilySchema = z.enum([
+  "validation",
+  "setup",
+  "authentication",
+  "import",
+  "parser",
+  "duplicate",
+  "classification",
+  "provider",
+  "backup",
+  "database",
+  "internal",
+]);
+
+export type ErrorFamily = z.infer<typeof ErrorFamilySchema>;
+
+export const ApiErrorSchema = z.object({
   error: z.object({
     code: z.string(),
     message: z.string(),
+    family: ErrorFamilySchema,
+    requestId: z.string().min(8).max(100),
+    details: z.record(z.string(), z.unknown()).optional(),
     retryAfterSeconds: z.number().int().positive().optional(),
     fields: z.record(z.string(), z.array(z.string())).optional(),
   }),
 });
 
-export type SecurityError = z.infer<typeof SecurityErrorSchema>;
+export type ApiError = z.infer<typeof ApiErrorSchema>;
+
+export const SecurityErrorSchema = ApiErrorSchema;
+export type SecurityError = ApiError;
+
+export const CurrencyCodeSchema = z
+  .string()
+  .regex(/^[A-Z]{3}$/, "Use a three-letter uppercase currency code.");
+
+export const PaginationQuerySchema = z.object({
+  cursor: z.string().min(1).max(500).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+export const SortQuerySchema = z.object({
+  sort: z.string().min(1).max(80).optional(),
+  direction: z.enum(["asc", "desc"]).default("desc"),
+});
+
+export const FilterQuerySchema = z.object({
+  search: z.string().trim().min(1).max(200).optional(),
+  accountId: z.string().min(1).max(200).optional(),
+  categoryId: z.string().min(1).max(200).optional(),
+  counterpartyId: z.string().min(1).max(200).optional(),
+  scope: z.enum(["personal", "business"]).optional(),
+  reviewState: z.enum(["unreviewed", "needs_review", "reviewed"]).optional(),
+  direction: z.enum(["debit", "credit"]).optional(),
+});
+
+export const DateRangeQuerySchema = z
+  .object({
+    startDate: z.iso.date().optional(),
+    endDate: z.iso.date().optional(),
+    timezone: z.string().min(1).max(100).optional(),
+  })
+  .refine(({ startDate, endDate }) => !startDate || !endDate || startDate <= endDate, {
+    message: "startDate must not be after endDate.",
+    path: ["endDate"],
+  });
+
+export const StandardListQuerySchema = PaginationQuerySchema.extend({
+  sort: SortQuerySchema.shape.sort,
+  direction: SortQuerySchema.shape.direction,
+  startDate: z.iso.date().optional(),
+  endDate: z.iso.date().optional(),
+  timezone: z.string().min(1).max(100).optional(),
+  currency: CurrencyCodeSchema.optional(),
+  search: FilterQuerySchema.shape.search,
+  accountId: FilterQuerySchema.shape.accountId,
+  categoryId: FilterQuerySchema.shape.categoryId,
+  counterpartyId: FilterQuerySchema.shape.counterpartyId,
+  scope: FilterQuerySchema.shape.scope,
+  reviewState: FilterQuerySchema.shape.reviewState,
+  transactionDirection: FilterQuerySchema.shape.direction,
+}).refine(({ startDate, endDate }) => !startDate || !endDate || startDate <= endDate, {
+  message: "startDate must not be after endDate.",
+  path: ["endDate"],
+});
+
+export type StandardListQuery = z.infer<typeof StandardListQuerySchema>;
+
+export const JobStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "cancelled"]);
+
+export const JobSchema = z.object({
+  id: z.string().uuid(),
+  type: z.string(),
+  status: JobStatusSchema,
+  progressBasisPoints: z.number().int().min(0).max(10_000),
+  progressMessage: z.string().nullable(),
+  attempts: z.number().int().nonnegative(),
+  maxAttempts: z.number().int().positive(),
+  availableAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable(),
+  completedAt: z.string().datetime().nullable(),
+  error: z
+    .object({
+      code: z.string(),
+      message: z.string(),
+    })
+    .nullable(),
+  result: z.unknown().nullable(),
+  relatedImportBatchId: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type Job = z.infer<typeof JobSchema>;
+
+export const ImportProgressSchema = z.object({
+  importId: z.string().uuid(),
+  status: z.enum(["pending", "previewed", "committed", "failed"]),
+  jobs: z.array(JobSchema),
+});
+
+export type ImportProgress = z.infer<typeof ImportProgressSchema>;
 
 export const apiPaths = {
   live: "/health/live",
@@ -160,4 +273,8 @@ export const apiPaths = {
   logoutAll: "/api/security/sessions/revoke",
   changePassword: "/api/security/password",
   rekey: "/api/security/database/rekey",
+  openApi: "/api/openapi.json",
+  job: (jobId: string) => `/api/jobs/${jobId}`,
+  cancelJob: (jobId: string) => `/api/jobs/${jobId}/cancel`,
+  importProgress: (importId: string) => `/api/imports/${importId}/progress`,
 } as const;

@@ -8,6 +8,7 @@ import type {
   SetupRequest,
 } from "@spendlens/contracts";
 import {
+  AuditLog,
   type DatabaseKeyProvider,
   databaseExists,
   type EncryptedDatabase,
@@ -48,8 +49,9 @@ export interface SessionCredentials {
   sessionExpiresAt: Date;
 }
 
-interface ValidSession {
+export interface AuthenticatedSession {
   id: string;
+  workspaceId: string;
   csrfTokenHash: string;
   expiresAt: Date;
   user: AuthenticatedUser;
@@ -91,6 +93,10 @@ export class SecurityService {
       return "keyring";
     }
     return kind;
+  }
+
+  get sqlite(): EncryptedDatabase["sqlite"] | null {
+    return this.#database?.sqlite ?? null;
   }
 
   async state(sessionToken?: string): Promise<SecurityState> {
@@ -165,6 +171,18 @@ export class SecurityService {
             updatedAt: now,
           })
           .run();
+        new AuditLog(database.sqlite, this.#clock).record({
+          workspaceId,
+          actorUserId: userId,
+          entityType: "workspace",
+          entityId: workspaceId,
+          action: "workspace.created",
+          afterState: {
+            name: input.workspaceName,
+            timezone: input.timezone,
+            setupStatus: "recovery-required",
+          },
+        });
       })();
       this.#database = database;
       this.#recordEvent("workspace.setup_prepared", "success", remoteAddress, workspaceId, userId);
@@ -184,6 +202,7 @@ export class SecurityService {
     if (!this.#database || !this.#workspace()) {
       throw new SecurityError("SETUP_NOT_STARTED", "Start workspace setup first.", 409);
     }
+    const database = this.#database;
     if (this.#workspace()?.setupCompletedAt) {
       throw new SecurityError("SETUP_ALREADY_COMPLETE", "Workspace setup is complete.", 409);
     }
@@ -205,11 +224,22 @@ export class SecurityService {
       throw new SecurityError("SETUP_INVALID", "Workspace setup data is incomplete.", 500);
     }
 
-    this.#database.db
-      .update(workspaces)
-      .set({ setupCompletedAt: now, updatedAt: now })
-      .where(eq(workspaces.id, workspace.id))
-      .run();
+    database.sqlite.transaction(() => {
+      database.db
+        .update(workspaces)
+        .set({ setupCompletedAt: now, updatedAt: now })
+        .where(eq(workspaces.id, workspace.id))
+        .run();
+      new AuditLog(database.sqlite, this.#clock).record({
+        workspaceId: workspace.id,
+        actorUserId: user.id,
+        entityType: "workspace",
+        entityId: workspace.id,
+        action: "workspace.setup_completed",
+        beforeState: { setupStatus: "recovery-required" },
+        afterState: { setupStatus: "complete" },
+      });
+    })();
     await this.#setupToken.consume();
     this.#recordEvent("workspace.setup_completed", "success", remoteAddress, workspace.id, user.id);
     return this.#createSession(user, remoteAddress, userAgent);
@@ -253,7 +283,7 @@ export class SecurityService {
     return this.#createSession(user, remoteAddress, userAgent);
   }
 
-  authenticate(sessionToken?: string): ValidSession {
+  authenticate(sessionToken?: string): AuthenticatedSession {
     if (!sessionToken) {
       throw new SecurityError("AUTHENTICATION_REQUIRED", "Sign in to continue.", 401);
     }
@@ -264,7 +294,7 @@ export class SecurityService {
     return session;
   }
 
-  verifyCsrf(session: ValidSession, cookieToken?: string, headerToken?: string): void {
+  verifyCsrf(session: AuthenticatedSession, cookieToken?: string, headerToken?: string): void {
     if (
       !cookieToken ||
       !headerToken ||
@@ -279,23 +309,44 @@ export class SecurityService {
     }
   }
 
-  logout(session: ValidSession, remoteAddress: string): void {
+  logout(session: AuthenticatedSession, remoteAddress: string): void {
     const database = this.#readyDatabase();
-    database.db
-      .update(sessions)
-      .set({ revokedAt: new Date(this.#clock()) })
-      .where(eq(sessions.id, session.id))
-      .run();
+    database.sqlite.transaction(() => {
+      database.db
+        .update(sessions)
+        .set({ revokedAt: new Date(this.#clock()) })
+        .where(eq(sessions.id, session.id))
+        .run();
+      this.#audit().record({
+        workspaceId: session.workspaceId,
+        actorUserId: session.user.id,
+        entityType: "session",
+        entityId: session.id,
+        action: "session.revoked",
+        beforeState: { status: "active" },
+        afterState: { status: "revoked" },
+      });
+    })();
     this.#recordEvent("auth.logout", "success", remoteAddress, undefined, session.user.id);
   }
 
-  revokeAllSessions(session: ValidSession, remoteAddress: string): void {
+  revokeAllSessions(session: AuthenticatedSession, remoteAddress: string): void {
     const database = this.#readyDatabase();
-    database.db
-      .update(sessions)
-      .set({ revokedAt: new Date(this.#clock()) })
-      .where(and(eq(sessions.userId, session.user.id), isNull(sessions.revokedAt)))
-      .run();
+    database.sqlite.transaction(() => {
+      database.db
+        .update(sessions)
+        .set({ revokedAt: new Date(this.#clock()) })
+        .where(and(eq(sessions.userId, session.user.id), isNull(sessions.revokedAt)))
+        .run();
+      this.#audit().record({
+        workspaceId: session.workspaceId,
+        actorUserId: session.user.id,
+        entityType: "user",
+        entityId: session.user.id,
+        action: "sessions.revoked_all",
+        afterState: { activeSessions: 0 },
+      });
+    })();
     this.#recordEvent(
       "auth.sessions_revoked",
       "success",
@@ -306,7 +357,7 @@ export class SecurityService {
   }
 
   async changePassword(
-    session: ValidSession,
+    session: AuthenticatedSession,
     input: ChangePasswordRequest,
     remoteAddress: string,
     userAgent?: string,
@@ -337,13 +388,22 @@ export class SecurityService {
         .set({ revokedAt: now })
         .where(and(eq(sessions.userId, user.id), isNull(sessions.revokedAt)))
         .run();
+      this.#audit().record({
+        workspaceId: user.workspaceId,
+        actorUserId: user.id,
+        entityType: "user",
+        entityId: user.id,
+        action: "credential.changed",
+        beforeState: { sessionsRevoked: false },
+        afterState: { sessionsRevoked: true },
+      });
     })();
     this.#recordEvent("auth.password_change", "success", remoteAddress, user.workspaceId, user.id);
     return this.#createSession(user, remoteAddress, userAgent);
   }
 
   async rekeyDatabase(
-    session: ValidSession,
+    session: AuthenticatedSession,
     password: string,
     remoteAddress: string,
   ): Promise<RecoveryKit> {
@@ -356,6 +416,14 @@ export class SecurityService {
 
     await database.rekey();
     this.#recordEvent("database.rekey", "success", remoteAddress, user.workspaceId, user.id);
+    this.#audit().record({
+      workspaceId: user.workspaceId,
+      actorUserId: user.id,
+      entityType: "database",
+      entityId: user.workspaceId,
+      action: "database.rekeyed",
+      afterState: { recoveryMaterialRequiresRefresh: true },
+    });
     return createRecoveryKit(user.workspaceId, database.key);
   }
 
@@ -393,7 +461,7 @@ export class SecurityService {
     return this.#database?.db.select().from(users).limit(1).get() ?? null;
   }
 
-  #findSession(token: string): ValidSession | null {
+  #findSession(token: string): AuthenticatedSession | null {
     const database = this.#readyDatabase();
     const now = new Date(this.#clock());
     const result = database.db
@@ -402,6 +470,7 @@ export class SecurityService {
         csrfTokenHash: sessions.csrfTokenHash,
         expiresAt: sessions.expiresAt,
         userId: users.id,
+        workspaceId: users.workspaceId,
         displayName: users.displayName,
         username: users.username,
       })
@@ -424,6 +493,7 @@ export class SecurityService {
 
     return {
       id: result.id,
+      workspaceId: result.workspaceId,
       csrfTokenHash: result.csrfTokenHash,
       expiresAt: result.expiresAt,
       user: {
@@ -437,6 +507,7 @@ export class SecurityService {
   #createSession(
     user: {
       id: string;
+      workspaceId: string;
       displayName: string;
       username: string;
     },
@@ -494,6 +565,10 @@ export class SecurityService {
         createdAt: new Date(this.#clock()),
       })
       .run();
+  }
+
+  #audit(): AuditLog {
+    return new AuditLog(this.#readyDatabase().sqlite, this.#clock);
   }
 }
 
