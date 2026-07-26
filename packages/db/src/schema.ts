@@ -1,4 +1,15 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import {
+  check,
+  foreignKey,
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+  type AnySQLiteColumn,
+} from "drizzle-orm/sqlite-core";
 
 export const workspaces = sqliteTable("workspaces", {
   id: text("id").primaryKey(),
@@ -77,4 +88,529 @@ export const securitySchema = {
   users,
   sessions,
   securityEvents,
+};
+
+const currencyCheck = (column: AnySQLiteColumn) =>
+  sql`length(${column}) = 3 AND ${column} GLOB '[A-Z][A-Z][A-Z]'`;
+
+export const accounts = sqliteTable(
+  "accounts",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    institutionName: text("institution_name").notNull(),
+    institutionCode: text("institution_code"),
+    displayName: text("display_name").notNull(),
+    accountType: text("account_type", {
+      enum: ["wallet", "current", "savings", "business", "loan", "cash", "other"],
+    })
+      .notNull()
+      .default("other"),
+    baseCurrency: text("base_currency").notNull(),
+    maskedAccountNumber: text("masked_account_number"),
+    isOwned: integer("is_owned", { mode: "boolean" }).notNull().default(true),
+    archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("accounts_workspace_idx").on(table.workspaceId),
+    check("accounts_currency_check", currencyCheck(table.baseCurrency)),
+  ],
+);
+
+export const ownedAccountIdentifiers = sqliteTable(
+  "owned_account_identifiers",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    institutionCode: text("institution_code").notNull(),
+    accountNumberFingerprint: text("account_number_fingerprint").notNull(),
+    maskedAccountNumber: text("masked_account_number").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("owned_account_identifiers_fingerprint_unique").on(
+      table.workspaceId,
+      table.institutionCode,
+      table.accountNumberFingerprint,
+    ),
+    index("owned_account_identifiers_account_idx").on(table.accountId),
+    check(
+      "owned_account_identifiers_fingerprint_check",
+      sql`length(${table.accountNumberFingerprint}) = 64
+          AND ${table.accountNumberFingerprint} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+  ],
+);
+
+export const importBatches = sqliteTable(
+  "import_batches",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    accountId: text("account_id").references(() => accounts.id, { onDelete: "restrict" }),
+    sourceType: text("source_type", { enum: ["pdf", "csv", "xlsx", "manual"] }).notNull(),
+    adapterKey: text("adapter_key").notNull(),
+    adapterVersion: text("adapter_version").notNull(),
+    sourceFilename: text("source_filename").notNull(),
+    fileFingerprint: text("file_fingerprint").notNull(),
+    status: text("status", {
+      enum: ["pending", "previewed", "committed", "failed"],
+    })
+      .notNull()
+      .default("pending"),
+    statementStartSource: text("statement_start_source"),
+    statementEndSource: text("statement_end_source"),
+    sourceTimezone: text("source_timezone").notNull(),
+    openingBalanceMinor: integer("opening_balance_minor"),
+    closingBalanceMinor: integer("closing_balance_minor"),
+    balanceCurrency: text("balance_currency"),
+    committedAt: integer("committed_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("import_batches_workspace_idx").on(table.workspaceId),
+    index("import_batches_account_idx").on(table.accountId),
+    index("import_batches_fingerprint_idx").on(table.workspaceId, table.fileFingerprint),
+    check(
+      "import_batches_fingerprint_check",
+      sql`length(${table.fileFingerprint}) = 64
+          AND ${table.fileFingerprint} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+    check(
+      "import_batches_balance_currency_check",
+      sql`(${table.openingBalanceMinor} IS NULL
+            AND ${table.closingBalanceMinor} IS NULL
+            AND ${table.balanceCurrency} IS NULL)
+          OR (${table.balanceCurrency} IS NOT NULL
+            AND ${currencyCheck(table.balanceCurrency)})`,
+    ),
+  ],
+);
+
+export const parsedSourceRows = sqliteTable(
+  "parsed_source_rows",
+  {
+    id: text("id").primaryKey(),
+    importBatchId: text("import_batch_id")
+      .notNull()
+      .references(() => importBatches.id, { onDelete: "cascade" }),
+    sourceRowIndex: integer("source_row_index").notNull(),
+    sourceTransactionId: text("source_transaction_id"),
+    sourceReference: text("source_reference"),
+    sourceTimestamp: text("source_timestamp").notNull(),
+    sourceTimezone: text("source_timezone").notNull(),
+    occurredAtUtc: integer("occurred_at_utc", { mode: "timestamp_ms" }).notNull(),
+    direction: text("direction", { enum: ["debit", "credit"] }).notNull(),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    balanceAfterMinor: integer("balance_after_minor"),
+    rawNarration: text("raw_narration"),
+    senderOrRecipientName: text("sender_or_recipient_name"),
+    institutionName: text("institution_name"),
+    maskedAccountNumber: text("masked_account_number"),
+    rowFingerprint: text("row_fingerprint").notNull(),
+    rawFields: text("raw_fields").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("parsed_source_rows_batch_row_unique").on(
+      table.importBatchId,
+      table.sourceRowIndex,
+    ),
+    uniqueIndex("parsed_source_rows_id_batch_unique").on(table.id, table.importBatchId),
+    index("parsed_source_rows_batch_idx").on(table.importBatchId),
+    index("parsed_source_rows_occurred_at_idx").on(table.occurredAtUtc),
+    index("parsed_source_rows_reference_idx").on(table.sourceReference),
+    check("parsed_source_rows_index_check", sql`${table.sourceRowIndex} >= 0`),
+    check(
+      "parsed_source_rows_amount_check",
+      sql`typeof(${table.amountMinor}) = 'integer' AND ${table.amountMinor} > 0`,
+    ),
+    check("parsed_source_rows_currency_check", currencyCheck(table.currency)),
+    check(
+      "parsed_source_rows_fingerprint_check",
+      sql`length(${table.rowFingerprint}) = 64
+          AND ${table.rowFingerprint} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+    check("parsed_source_rows_raw_fields_check", sql`json_valid(${table.rawFields})`),
+  ],
+);
+
+export const counterparties = sqliteTable(
+  "counterparties",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    displayName: text("display_name").notNull(),
+    normalizedName: text("normalized_name").notNull(),
+    kind: text("kind", {
+      enum: ["person", "business", "merchant", "bank", "government", "unknown"],
+    })
+      .notNull()
+      .default("unknown"),
+    institutionName: text("institution_name"),
+    accountNumberFingerprint: text("account_number_fingerprint"),
+    maskedAccountNumber: text("masked_account_number"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("counterparties_workspace_idx").on(table.workspaceId),
+    index("counterparties_normalized_name_idx").on(table.workspaceId, table.normalizedName),
+    check(
+      "counterparties_fingerprint_check",
+      sql`${table.accountNumberFingerprint} IS NULL
+          OR (length(${table.accountNumberFingerprint}) = 64
+            AND ${table.accountNumberFingerprint} NOT GLOB '*[^0-9a-f]*')`,
+    ),
+  ],
+);
+
+export const categories = sqliteTable(
+  "categories",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    parentId: text("parent_id").references((): AnySQLiteColumn => categories.id, {
+      onDelete: "set null",
+    }),
+    systemKey: text("system_key"),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    isIncome: integer("is_income", { mode: "boolean" }).notNull().default(false),
+    isExpense: integer("is_expense", { mode: "boolean" }).notNull().default(false),
+    isTransfer: integer("is_transfer", { mode: "boolean" }).notNull().default(false),
+    isEssential: integer("is_essential", { mode: "boolean" }).notNull().default(false),
+    isDiscretionary: integer("is_discretionary", { mode: "boolean" }).notNull().default(false),
+    isSavings: integer("is_savings", { mode: "boolean" }).notNull().default(false),
+    isRefund: integer("is_refund", { mode: "boolean" }).notNull().default(false),
+    isFee: integer("is_fee", { mode: "boolean" }).notNull().default(false),
+    isCashWithdrawal: integer("is_cash_withdrawal", { mode: "boolean" }).notNull().default(false),
+    archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("categories_workspace_slug_unique").on(table.workspaceId, table.slug),
+    uniqueIndex("categories_workspace_system_key_unique").on(table.workspaceId, table.systemKey),
+    index("categories_parent_idx").on(table.parentId),
+    check(
+      "categories_parent_check",
+      sql`${table.parentId} IS NULL OR ${table.parentId} <> ${table.id}`,
+    ),
+    check(
+      "categories_spending_type_check",
+      sql`NOT (${table.isEssential} = 1 AND ${table.isDiscretionary} = 1)`,
+    ),
+  ],
+);
+
+export const transactions = sqliteTable(
+  "transactions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "restrict" }),
+    occurredAtUtc: integer("occurred_at_utc", { mode: "timestamp_ms" }).notNull(),
+    sourceTimestamp: text("source_timestamp").notNull(),
+    sourceTimezone: text("source_timezone").notNull(),
+    valueAtUtc: integer("value_at_utc", { mode: "timestamp_ms" }),
+    direction: text("direction", { enum: ["debit", "credit"] }).notNull(),
+    transactionType: text("transaction_type", {
+      enum: [
+        "expense",
+        "income",
+        "transfer",
+        "refund",
+        "fee",
+        "cash_withdrawal",
+        "debt",
+        "unclassified",
+      ],
+    })
+      .notNull()
+      .default("unclassified"),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    normalizedNarration: text("normalized_narration"),
+    sourceReference: text("source_reference"),
+    counterpartyId: text("counterparty_id").references(() => counterparties.id, {
+      onDelete: "set null",
+    }),
+    categoryId: text("category_id").references(() => categories.id, {
+      onDelete: "set null",
+    }),
+    scope: text("scope", { enum: ["personal", "business"] })
+      .notNull()
+      .default("personal"),
+    classificationSource: text("classification_source", {
+      enum: ["unclassified", "manual", "rule", "history", "deterministic", "ai"],
+    })
+      .notNull()
+      .default("unclassified"),
+    confidenceLevel: text("confidence_level", {
+      enum: ["unknown", "low", "medium", "high", "confirmed"],
+    })
+      .notNull()
+      .default("unknown"),
+    confidenceBasisPoints: integer("confidence_basis_points"),
+    classificationExplanation: text("classification_explanation"),
+    reviewState: text("review_state", {
+      enum: ["unreviewed", "needs_review", "reviewed"],
+    })
+      .notNull()
+      .default("unreviewed"),
+    pairedTransactionId: text("paired_transaction_id").references(
+      (): AnySQLiteColumn => transactions.id,
+      { onDelete: "set null" },
+    ),
+    transferPairingStatus: text("transfer_pairing_status", {
+      enum: ["none", "suggested", "confirmed", "rejected"],
+    })
+      .notNull()
+      .default("none"),
+    transferPairingConfidenceBasisPoints: integer("transfer_pairing_confidence_basis_points"),
+    transferPairingSource: text("transfer_pairing_source", {
+      enum: ["automatic", "manual"],
+    }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("transactions_workspace_date_idx").on(table.workspaceId, table.occurredAtUtc),
+    index("transactions_account_idx").on(table.accountId),
+    index("transactions_category_idx").on(table.categoryId),
+    index("transactions_counterparty_idx").on(table.counterpartyId),
+    index("transactions_review_state_idx").on(table.workspaceId, table.reviewState),
+    index("transactions_pair_idx").on(table.pairedTransactionId),
+    check(
+      "transactions_amount_check",
+      sql`typeof(${table.amountMinor}) = 'integer'
+          AND ${table.amountMinor} > 0
+          AND ${table.amountMinor} <= 9007199254740991`,
+    ),
+    check("transactions_currency_check", currencyCheck(table.currency)),
+    check(
+      "transactions_confidence_check",
+      sql`${table.confidenceBasisPoints} IS NULL
+          OR ${table.confidenceBasisPoints} BETWEEN 0 AND 10000`,
+    ),
+    check(
+      "transactions_pair_confidence_check",
+      sql`${table.transferPairingConfidenceBasisPoints} IS NULL
+          OR ${table.transferPairingConfidenceBasisPoints} BETWEEN 0 AND 10000`,
+    ),
+    check(
+      "transactions_pair_check",
+      sql`${table.pairedTransactionId} IS NULL OR ${table.pairedTransactionId} <> ${table.id}`,
+    ),
+    check(
+      "transactions_confirmed_pair_check",
+      sql`${table.transferPairingStatus} <> 'confirmed'
+          OR (${table.pairedTransactionId} IS NOT NULL AND ${table.transactionType} = 'transfer')`,
+    ),
+  ],
+);
+
+export const transactionSources = sqliteTable(
+  "transaction_sources",
+  {
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    parsedSourceRowId: text("parsed_source_row_id").notNull(),
+    importBatchId: text("import_batch_id")
+      .notNull()
+      .references(() => importBatches.id, { onDelete: "cascade" }),
+    linkType: text("link_type", { enum: ["original", "duplicate"] }).notNull(),
+    matchConfidence: text("match_confidence", {
+      enum: ["strong", "medium", "weak", "manual"],
+    }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.transactionId, table.parsedSourceRowId] }),
+    uniqueIndex("transaction_sources_source_unique").on(table.parsedSourceRowId),
+    index("transaction_sources_transaction_idx").on(table.transactionId),
+    index("transaction_sources_import_batch_idx").on(table.importBatchId),
+    foreignKey({
+      columns: [table.parsedSourceRowId, table.importBatchId],
+      foreignColumns: [parsedSourceRows.id, parsedSourceRows.importBatchId],
+      name: "transaction_sources_source_batch_fk",
+    }).onDelete("cascade"),
+  ],
+);
+
+export const transactionSplitSets = sqliteTable(
+  "transaction_split_sets",
+  {
+    id: text("id").primaryKey(),
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    status: text("status", { enum: ["draft", "active", "superseded"] })
+      .notNull()
+      .default("draft"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    activatedAt: integer("activated_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("transaction_split_sets_active_unique")
+      .on(table.transactionId)
+      .where(sql`${table.status} = 'active'`),
+    index("transaction_split_sets_transaction_idx").on(table.transactionId),
+  ],
+);
+
+export const transactionSplits = sqliteTable(
+  "transaction_splits",
+  {
+    id: text("id").primaryKey(),
+    splitSetId: text("split_set_id")
+      .notNull()
+      .references(() => transactionSplitSets.id, { onDelete: "cascade" }),
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => categories.id, { onDelete: "restrict" }),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    note: text("note"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("transaction_splits_set_idx").on(table.splitSetId),
+    index("transaction_splits_category_idx").on(table.categoryId),
+    check(
+      "transaction_splits_amount_check",
+      sql`typeof(${table.amountMinor}) = 'integer' AND ${table.amountMinor} > 0`,
+    ),
+    check("transaction_splits_currency_check", currencyCheck(table.currency)),
+  ],
+);
+
+export const transactionNotes = sqliteTable(
+  "transaction_notes",
+  {
+    id: text("id").primaryKey(),
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    authorUserId: text("author_user_id").references(() => users.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("transaction_notes_transaction_idx").on(table.transactionId),
+    check("transaction_notes_body_check", sql`length(trim(${table.body})) > 0`),
+  ],
+);
+
+export const tags = sqliteTable(
+  "tags",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    color: text("color"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("tags_workspace_slug_unique").on(table.workspaceId, table.slug),
+    index("tags_workspace_idx").on(table.workspaceId),
+  ],
+);
+
+export const transactionTags = sqliteTable(
+  "transaction_tags",
+  {
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.transactionId, table.tagId] })],
+);
+
+export const transactionRevisions = sqliteTable(
+  "transaction_revisions",
+  {
+    id: text("id").primaryKey(),
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    revisionNumber: integer("revision_number").notNull(),
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    source: text("source", { enum: ["manual", "rule", "system", "import"] }).notNull(),
+    beforeValues: text("before_values").notNull(),
+    afterValues: text("after_values").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("transaction_revisions_number_unique").on(
+      table.transactionId,
+      table.revisionNumber,
+    ),
+    index("transaction_revisions_transaction_idx").on(table.transactionId),
+    check("transaction_revisions_number_check", sql`${table.revisionNumber} > 0`),
+    check(
+      "transaction_revisions_json_check",
+      sql`json_valid(${table.beforeValues}) AND json_valid(${table.afterValues})`,
+    ),
+  ],
+);
+
+export const financialSchema = {
+  accounts,
+  ownedAccountIdentifiers,
+  importBatches,
+  parsedSourceRows,
+  counterparties,
+  categories,
+  transactions,
+  transactionSources,
+  transactionSplitSets,
+  transactionSplits,
+  transactionNotes,
+  tags,
+  transactionTags,
+  transactionRevisions,
+};
+
+export const databaseSchema = {
+  ...securitySchema,
+  ...financialSchema,
 };

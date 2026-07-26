@@ -1,8 +1,11 @@
 import type Database from "better-sqlite3";
+import { financialDomainMigrationSql } from "./financial-domain-migration.js";
+import { seedStarterTaxonomy } from "./taxonomy.js";
 
 interface Migration {
   id: string;
   sql: string;
+  after?: (sqlite: Database.Database) => void;
 }
 
 const migrations: Migration[] = [
@@ -64,9 +67,21 @@ const migrations: Migration[] = [
       CREATE INDEX security_events_created_at_idx ON security_events(created_at);
     `,
   },
+  {
+    id: "0001_financial_domain",
+    sql: financialDomainMigrationSql,
+    after(sqlite) {
+      const workspaces = sqlite.prepare("SELECT id FROM workspaces").all() as Array<{
+        id: string;
+      }>;
+      for (const workspace of workspaces) {
+        seedStarterTaxonomy(sqlite, workspace.id);
+      }
+    },
+  },
 ];
 
-export function applyMigrations(sqlite: Database.Database): void {
+export function applyMigrations(sqlite: Database.Database, throughId?: string): void {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS _spendlens_migrations (
       id TEXT PRIMARY KEY NOT NULL,
@@ -81,10 +96,12 @@ export function applyMigrations(sqlite: Database.Database): void {
 
   const migrate = sqlite.transaction((migration: Migration) => {
     sqlite.exec(migration.sql);
+    migration.after?.(sqlite);
     recordMigration.run(migration.id, Date.now());
   });
 
   for (const migration of migrations) {
+    if (throughId && migration.id > throughId) break;
     if (!hasMigration.get(migration.id)) {
       migrate(migration);
     }
