@@ -1,4 +1,7 @@
 export * from "./audit-log.js";
+export * from "./classification-migration.js";
+export * from "./classification-engine.js";
+export * from "./classification-review.js";
 export * from "./encrypted-database.js";
 export * from "./job-queue.js";
 export * from "./import-preview-store.js";

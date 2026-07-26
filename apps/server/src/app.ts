@@ -1,6 +1,8 @@
 import { apiPaths, ServiceHealthSchema, type ServiceHealth } from "@spendlens/contracts";
 import {
   AuditLog,
+  ClassificationEngine,
+  ClassificationReview,
   ImportPreviewStore,
   ImportReconciliationStore,
   JobQueue,
@@ -18,6 +20,7 @@ import {
   requestTelemetry,
 } from "./api/operational-logger.js";
 import type { AppEnv } from "./api/request-context.js";
+import { createClassificationRoutes } from "./classification/classification-routes.js";
 import { createImportRoutes } from "./imports/import-routes.js";
 import { ImportPreviewService } from "./imports/import-service.js";
 import { createSecurityRoutes, requireApiAuthentication } from "./security/security-routes.js";
@@ -45,6 +48,8 @@ export interface CreateAppOptions {
   importReconciler?: ImportReconciliationStore;
   transactions?: TransactionWorkspace;
   management?: WorkspaceManagement;
+  classification?: ClassificationEngine;
+  classificationReview?: ClassificationReview;
   importTemporaryRoot?: string;
   logger?: OperationalLogger;
 }
@@ -125,6 +130,9 @@ export function createApp(options: CreateAppOptions = {}) {
     const importReconciler = options.importReconciler ?? new ImportReconciliationStore(sqlite);
     const transactions = options.transactions ?? new TransactionWorkspace(sqlite);
     const management = options.management ?? new WorkspaceManagement(sqlite);
+    const classification = options.classification ?? new ClassificationEngine(sqlite);
+    const classificationReview =
+      options.classificationReview ?? new ClassificationReview(sqlite, classification);
 
     app.use("/api/*", requireApiAuthentication(security));
     app.route(
@@ -140,6 +148,7 @@ export function createApp(options: CreateAppOptions = {}) {
       createImportRoutes({
         previews: importPreviews,
         reconciler: importReconciler,
+        classification,
         audit,
         ...(options.importTemporaryRoot ? { temporaryRoot: options.importTemporaryRoot } : {}),
       }),
@@ -149,6 +158,14 @@ export function createApp(options: CreateAppOptions = {}) {
       createTransactionRoutes({
         transactions,
         management,
+        audit,
+      }),
+    );
+    app.route(
+      "/",
+      createClassificationRoutes({
+        engine: classification,
+        review: classificationReview,
         audit,
       }),
     );

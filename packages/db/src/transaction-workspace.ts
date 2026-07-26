@@ -72,6 +72,18 @@ export interface TransactionRecord {
   confidence: TransactionConfidence;
   confidenceBasisPoints: number | null;
   classificationExplanation: string | null;
+  classificationDecision: {
+    winnerRule: { id: string; name: string } | null;
+    matchedRules: Array<{ id: string; name: string }>;
+    suppressedRules: Array<{ id: string; name: string }>;
+    conflictRules: Array<{ id: string; name: string }>;
+    evidence: Array<{
+      code: string;
+      label: string;
+      source: "manual" | "transfer" | "rule" | "counterparty" | "bank" | "history" | "fallback";
+      ruleId?: string | null | undefined;
+    }>;
+  } | null;
   reviewState: TransactionReviewState;
   note: string | null;
   splits: Array<{
@@ -171,11 +183,55 @@ interface CursorValue {
   id: string;
 }
 
+interface ClassificationDecisionRow {
+  winner_rule_id: string | null;
+  matched_rule_ids: string;
+  suppressed_rule_ids: string;
+  conflict_rule_ids: string;
+  evidence: string;
+}
+
 const SORT_COLUMNS: Record<TransactionListInput["sort"], string> = {
   occurredAt: "t.occurred_at_utc",
   amount: "t.amount_minor",
   createdAt: "t.created_at",
 };
+
+function parseStringArray(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseClassificationEvidence(
+  value: string,
+): NonNullable<TransactionRecord["classificationDecision"]>["evidence"] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(
+      (
+        item,
+      ): item is NonNullable<TransactionRecord["classificationDecision"]>["evidence"][number] =>
+        typeof item === "object" &&
+        item !== null &&
+        typeof (item as { code?: unknown }).code === "string" &&
+        typeof (item as { label?: unknown }).label === "string" &&
+        ["manual", "transfer", "rule", "counterparty", "bank", "history", "fallback"].includes(
+          String((item as { source?: unknown }).source),
+        ),
+    );
+  } catch {
+    return [];
+  }
+}
 
 const baseSelect = `
   SELECT
@@ -770,6 +826,38 @@ export class TransactionWorkspace {
       )
       .all(row.id) as SourceRow[];
     const primarySource = sourceRows[0];
+    const decision = sqlite
+      .prepare(
+        `SELECT winner_rule_id, matched_rule_ids, suppressed_rule_ids, conflict_rule_ids, evidence
+         FROM classification_decisions
+         WHERE transaction_id = ?`,
+      )
+      .get(row.id) as ClassificationDecisionRow | undefined;
+    const decisionRuleIds = decision
+      ? [
+          ...new Set([
+            ...parseStringArray(decision.matched_rule_ids),
+            ...parseStringArray(decision.suppressed_rule_ids),
+            ...parseStringArray(decision.conflict_rule_ids),
+            ...(decision.winner_rule_id ? [decision.winner_rule_id] : []),
+          ]),
+        ]
+      : [];
+    const decisionRuleNames =
+      decisionRuleIds.length > 0
+        ? new Map(
+            (
+              sqlite
+                .prepare(
+                  `SELECT id, name FROM classification_rules
+                   WHERE id IN (${decisionRuleIds.map(() => "?").join(", ")})`,
+                )
+                .all(...decisionRuleIds) as Array<{ id: string; name: string }>
+            ).map((rule) => [rule.id, rule.name]),
+          )
+        : new Map<string, string>();
+    const summarizeRules = (ids: string[]) =>
+      ids.map((id) => ({ id, name: decisionRuleNames.get(id) ?? "Deleted rule" }));
 
     return {
       id: row.id,
@@ -804,6 +892,17 @@ export class TransactionWorkspace {
       confidence: row.confidence_level,
       confidenceBasisPoints: row.confidence_basis_points,
       classificationExplanation: row.classification_explanation,
+      classificationDecision: decision
+        ? {
+            winnerRule: decision.winner_rule_id
+              ? (summarizeRules([decision.winner_rule_id])[0] ?? null)
+              : null,
+            matchedRules: summarizeRules(parseStringArray(decision.matched_rule_ids)),
+            suppressedRules: summarizeRules(parseStringArray(decision.suppressed_rule_ids)),
+            conflictRules: summarizeRules(parseStringArray(decision.conflict_rule_ids)),
+            evidence: parseClassificationEvidence(decision.evidence),
+          }
+        : null,
       reviewState: row.review_state,
       note,
       splits: splitRows.map((split) => ({

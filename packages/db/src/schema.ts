@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnySQLiteColumn,
   check,
   foreignKey,
   index,
@@ -8,7 +9,6 @@ import {
   sqliteTable,
   text,
   uniqueIndex,
-  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 
 export const workspaces = sqliteTable("workspaces", {
@@ -656,6 +656,123 @@ export const transactionRevisions = sqliteTable(
   ],
 );
 
+export const classificationRules = sqliteTable(
+  "classification_rules",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: text("kind", { enum: ["exact", "pattern", "counterparty", "bank"] }).notNull(),
+    conditions: text("conditions").notNull(),
+    action: text("action").notNull(),
+    priority: integer("priority").notNull().default(0),
+    specificity: integer("specificity").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdByUserId: text("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("classification_rules_workspace_order_idx").on(
+      table.workspaceId,
+      table.enabled,
+      table.priority,
+      table.specificity,
+      table.createdAt,
+      table.id,
+    ),
+    index("classification_rules_kind_idx").on(table.workspaceId, table.kind, table.enabled),
+    check(
+      "classification_rules_json_check",
+      sql`json_valid(${table.conditions}) AND json_valid(${table.action})`,
+    ),
+    check("classification_rules_priority_check", sql`${table.priority} BETWEEN -1000 AND 1000`),
+    check("classification_rules_specificity_check", sql`${table.specificity} >= 0`),
+  ],
+);
+
+export const classificationDecisions = sqliteTable(
+  "classification_decisions",
+  {
+    transactionId: text("transaction_id")
+      .primaryKey()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    source: text("source", {
+      enum: ["manual", "transfer", "rule", "counterparty", "bank", "history", "unclassified"],
+    }).notNull(),
+    confidence: text("confidence", {
+      enum: ["unknown", "low", "medium", "high", "confirmed"],
+    }).notNull(),
+    suggestion: text("suggestion"),
+    winnerRuleId: text("winner_rule_id").references(() => classificationRules.id, {
+      onDelete: "set null",
+    }),
+    matchedRuleIds: text("matched_rule_ids").notNull(),
+    suppressedRuleIds: text("suppressed_rule_ids").notNull(),
+    conflictRuleIds: text("conflict_rule_ids").notNull(),
+    evidence: text("evidence").notNull(),
+    needsReview: integer("needs_review", { mode: "boolean" }).notNull(),
+    evaluatedAt: integer("evaluated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("classification_decisions_review_idx").on(
+      table.workspaceId,
+      table.needsReview,
+      table.evaluatedAt,
+    ),
+    index("classification_decisions_winner_idx").on(table.winnerRuleId),
+    check(
+      "classification_decisions_json_check",
+      sql`(${table.suggestion} IS NULL OR json_valid(${table.suggestion}))
+          AND json_valid(${table.matchedRuleIds})
+          AND json_valid(${table.suppressedRuleIds})
+          AND json_valid(${table.conflictRuleIds})
+          AND json_valid(${table.evidence})`,
+    ),
+  ],
+);
+
+export const classificationReviewActions = sqliteTable(
+  "classification_review_actions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    groupKey: text("group_key").notNull(),
+    decision: text("decision", { enum: ["accept", "change", "ignore"] }).notNull(),
+    applyScope: text("apply_scope", {
+      enum: ["selected", "existing_matches", "future_matches"],
+    }).notNull(),
+    transactionIds: text("transaction_ids").notNull(),
+    beforeValues: text("before_values").notNull(),
+    afterValues: text("after_values").notNull(),
+    createdRuleId: text("created_rule_id").references(() => classificationRules.id, {
+      onDelete: "set null",
+    }),
+    undoneAt: integer("undone_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("classification_review_actions_workspace_idx").on(table.workspaceId, table.createdAt),
+    index("classification_review_actions_rule_idx").on(table.createdRuleId),
+    check(
+      "classification_review_actions_json_check",
+      sql`json_valid(${table.transactionIds})
+          AND json_valid(${table.beforeValues})
+          AND json_valid(${table.afterValues})`,
+    ),
+  ],
+);
+
 export const importReconciliations = sqliteTable(
   "import_reconciliations",
   {
@@ -861,6 +978,9 @@ export const financialSchema = {
   tags,
   transactionTags,
   transactionRevisions,
+  classificationRules,
+  classificationDecisions,
+  classificationReviewActions,
   importReconciliations,
   importMatchDecisions,
 };

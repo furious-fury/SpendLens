@@ -6,14 +6,20 @@ import {
   ApiErrorSchema,
   BulkTransactionResultSchema,
   CategorySchema,
+  ClassificationPreviewSchema,
+  ClassificationRuleListSchema,
+  ClassificationRuleSchema,
   ImportDeduplicationSummarySchema,
   ImportPreviewSchema,
   ImportProgressSchema,
   JobSchema,
+  ReviewDecisionResultSchema,
+  ReviewGroupListSchema,
   TransactionListSchema,
   TransactionSchema,
+  UndoReviewDecisionResultSchema,
 } from "@spendlens/contracts";
-import { AuditLog, JobQueue, MemoryKeyProvider } from "@spendlens/db";
+import { AuditLog, JobQueue, MemoryKeyProvider, starterCategoryId } from "@spendlens/db";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { AppError } from "../src/api/app-error.js";
@@ -60,6 +66,11 @@ describe("OpenAPI and structured API behavior", () => {
     expect(document.paths).toHaveProperty("/api/categories");
     expect(document.paths).toHaveProperty("/api/categories/{categoryId}/merge");
     expect(document.paths).toHaveProperty("/api/counterparties");
+    expect(document.paths).toHaveProperty("/api/classification/rules");
+    expect(document.paths).toHaveProperty("/api/classification/rules/preview");
+    expect(document.paths).toHaveProperty("/api/classification/rules/reorder");
+    expect(document.paths).toHaveProperty("/api/classification/review");
+    expect(document.paths).toHaveProperty("/api/classification/review/decisions");
 
     const invalid = await fixture.app.request("/api/jobs/not-a-uuid", {
       headers: fixture.authHeaders(),
@@ -665,6 +676,163 @@ describe("transaction workspace API", () => {
       transactionType: "transfer",
       transfer: { status: "confirmed", pairedTransactionId: debitId },
     });
+    fixture.close();
+  });
+});
+
+describe("classification and grouped review API", () => {
+  it("previews and manages rules, reviews similar transactions, and undoes bulk decisions", async () => {
+    const fixture = await initializedFixture();
+    const accountResponse = await fixture.app.request(apiPaths.accounts, {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        institutionName: "PalmPay",
+        institutionCode: "palmpay",
+        displayName: "PalmPay wallet",
+        accountType: "wallet",
+        baseCurrency: "NGN",
+        isOwned: true,
+      }),
+    });
+    const account = AccountSchema.parse(await accountResponse.json());
+    const subscriptions = starterCategoryId(fixture.workspaceId, "subscriptions");
+    const ruleTransactionId = insertApiTransaction(fixture, account.id, {
+      amountMinor: 6_500,
+      narration: "NETFLIX MONTHLY",
+    });
+    const draft = {
+      name: "Netflix subscription",
+      kind: "exact",
+      conditions: [{ field: "narration", operator: "equals", value: "NETFLIX MONTHLY" }],
+      action: { categoryId: subscriptions, transactionType: "expense" },
+      priority: 20,
+      enabled: true,
+    };
+    const previewResponse = await fixture.app.request(apiPaths.classificationRulePreview, {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify(draft),
+    });
+    expect(ClassificationPreviewSchema.parse(await previewResponse.json())).toMatchObject({
+      matchCount: 1,
+      changeCount: 1,
+      items: [{ transactionId: ruleTransactionId, wouldChange: true }],
+    });
+
+    const createResponse = await fixture.app.request(apiPaths.classificationRules, {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify(draft),
+    });
+    const created = ClassificationRuleSchema.parse(await createResponse.json());
+    expect(created).toMatchObject({ name: "Netflix subscription", matchCount: 1 });
+    expect(
+      fixture.sqlite
+        .prepare("SELECT category_id AS categoryId FROM transactions WHERE id = ?")
+        .get(ruleTransactionId),
+    ).toEqual({ categoryId: subscriptions });
+    const classifiedResponse = await fixture.app.request(apiPaths.transaction(ruleTransactionId), {
+      headers: fixture.authHeaders(),
+    });
+    expect(
+      TransactionSchema.parse(await classifiedResponse.json()).classificationDecision,
+    ).toMatchObject({
+      winnerRule: { id: created.id, name: "Netflix subscription" },
+      matchedRules: [{ id: created.id, name: "Netflix subscription" }],
+      suppressedRules: [],
+      conflictRules: [],
+      evidence: expect.arrayContaining([
+        expect.objectContaining({ source: "rule", ruleId: created.id }),
+      ]),
+    });
+
+    const disableResponse = await fixture.app.request(apiPaths.classificationRule(created.id), {
+      method: "PATCH",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(ClassificationRuleSchema.parse(await disableResponse.json()).enabled).toBe(false);
+    expect(
+      fixture.sqlite
+        .prepare("SELECT category_id AS categoryId FROM transactions WHERE id = ?")
+        .get(ruleTransactionId),
+    ).toEqual({ categoryId: null });
+    await fixture.app.request(apiPaths.classificationRule(created.id), {
+      method: "PATCH",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({ enabled: true }),
+    });
+    const reorderResponse = await fixture.app.request(apiPaths.classificationRuleReorder, {
+      method: "PUT",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({ ruleIds: [created.id] }),
+    });
+    expect(ClassificationRuleListSchema.parse(await reorderResponse.json()).items).toHaveLength(1);
+
+    const first = insertApiTransaction(fixture, account.id, {
+      amountMinor: 10_000,
+      narration: "Transfer to Chidi 123456",
+    });
+    const second = insertApiTransaction(fixture, account.id, {
+      amountMinor: 15_000,
+      narration: "Transfer to Chidi 987654",
+    });
+    const groupsResponse = await fixture.app.request(apiPaths.reviewGroups, {
+      headers: fixture.authHeaders(),
+    });
+    const groups = ReviewGroupListSchema.parse(await groupsResponse.json());
+    const group = groups.items.find(({ transactions }) =>
+      transactions.some(({ id }) => id === first),
+    );
+    expect(group).toMatchObject({
+      basis: "narration",
+      transactionCount: 2,
+      transactions: expect.arrayContaining([
+        expect.objectContaining({ id: first }),
+        expect.objectContaining({ id: second }),
+      ]),
+    });
+    if (!group) throw new Error("Expected grouped review transactions.");
+    const family = starterCategoryId(fixture.workspaceId, "family-and-support");
+    const decisionResponse = await fixture.app.request(apiPaths.reviewDecisions, {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        groupKey: group.key,
+        decision: "change",
+        applyScope: "future_matches",
+        action: { categoryId: family, transactionType: "expense" },
+        rememberForFuture: true,
+        ruleName: "Transfers to Chidi",
+      }),
+    });
+    const decision = ReviewDecisionResultSchema.parse(await decisionResponse.json());
+    expect(decision).toMatchObject({
+      affectedCount: 2,
+      createdRule: { name: "Transfers to Chidi" },
+    });
+    const undoResponse = await fixture.app.request(apiPaths.undoReviewDecision(decision.actionId), {
+      method: "POST",
+      headers: fixture.authHeaders(true),
+    });
+    expect(UndoReviewDecisionResultSchema.parse(await undoResponse.json())).toEqual({
+      actionId: decision.actionId,
+      restoredCount: 2,
+    });
+
+    const deleteResponse = await fixture.app.request(apiPaths.classificationRule(created.id), {
+      method: "DELETE",
+      headers: fixture.authHeaders(true),
+    });
+    expect(ClassificationRuleSchema.parse(await deleteResponse.json()).id).toBe(created.id);
+    const relatedAuditCount = fixture.sqlite
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_events
+         WHERE workspace_id = ? AND related_rule_id IS NOT NULL`,
+      )
+      .get(fixture.workspaceId) as { count: number };
+    expect(relatedAuditCount.count).toBeGreaterThan(0);
     fixture.close();
   });
 });

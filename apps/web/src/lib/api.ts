@@ -1,33 +1,43 @@
 import {
   AccountListSchema,
   AccountSchema,
+  type ApplyReviewDecision,
+  apiPaths,
+  type BulkTransactionEdit,
   BulkTransactionResultSchema,
   CategoryListSchema,
   CategorySchema,
   type ChangePasswordRequest,
+  type ClassificationPreviewRequest,
+  ClassificationPreviewSchema,
+  ClassificationRuleListSchema,
+  ClassificationRuleSchema,
   CounterpartyListSchema,
   CounterpartySchema,
-  type BulkTransactionEdit,
   type CreateAccount,
   type CreateCategory,
+  type CreateClassificationRule,
   type CreateCounterparty,
   RekeyResponseSchema,
   type ReplaceTransactionSplits,
+  ReviewDecisionResultSchema,
+  ReviewGroupListSchema,
   SecurityErrorSchema,
   SecuritySessionSchema,
   SecurityStateSchema,
-  ServiceHealthSchema,
   type ServiceHealth,
+  ServiceHealthSchema,
   SetupPreparedSchema,
   type SetupRequest,
   type TransactionEdit,
   type TransactionListQuery,
   TransactionListSchema,
   TransactionSchema,
+  UndoReviewDecisionResultSchema,
   type UpdateAccount,
   type UpdateCategory,
+  type UpdateClassificationRule,
   type UpdateCounterparty,
-  apiPaths,
 } from "@spendlens/contracts";
 
 export class ApiError extends Error {
@@ -228,6 +238,57 @@ export const api = {
       input,
       (value) => CounterpartySchema.parse(value),
       "PATCH",
+    );
+  },
+  classificationRules() {
+    return request(apiPaths.classificationRules, (value) =>
+      ClassificationRuleListSchema.parse(value),
+    );
+  },
+  previewClassificationRule(input: ClassificationPreviewRequest) {
+    return mutate(apiPaths.classificationRulePreview, input, (value) =>
+      ClassificationPreviewSchema.parse(value),
+    );
+  },
+  createClassificationRule(input: CreateClassificationRule) {
+    return mutate(apiPaths.classificationRules, input, (value) =>
+      ClassificationRuleSchema.parse(value),
+    );
+  },
+  updateClassificationRule(ruleId: string, input: UpdateClassificationRule) {
+    return mutate(
+      apiPaths.classificationRule(ruleId),
+      input,
+      (value) => ClassificationRuleSchema.parse(value),
+      "PATCH",
+    );
+  },
+  async deleteClassificationRule(ruleId: string) {
+    return request(
+      apiPaths.classificationRule(ruleId),
+      (value) => ClassificationRuleSchema.parse(value),
+      { method: "DELETE" },
+    );
+  },
+  reorderClassificationRules(ruleIds: string[]) {
+    return mutate(
+      apiPaths.classificationRuleReorder,
+      { ruleIds },
+      (value) => ClassificationRuleListSchema.parse(value),
+      "PUT",
+    );
+  },
+  reviewGroups() {
+    return request(apiPaths.reviewGroups, (value) => ReviewGroupListSchema.parse(value));
+  },
+  applyReviewDecision(input: ApplyReviewDecision) {
+    return mutate(apiPaths.reviewDecisions, input, (value) =>
+      ReviewDecisionResultSchema.parse(value),
+    );
+  },
+  undoReviewDecision(actionId: string) {
+    return mutate(apiPaths.undoReviewDecision(actionId), undefined, (value) =>
+      UndoReviewDecisionResultSchema.parse(value),
     );
   },
 };
