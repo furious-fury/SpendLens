@@ -1,6 +1,18 @@
 import {
+  AccountListSchema,
+  AccountSchema,
+  BulkTransactionResultSchema,
+  CategoryListSchema,
+  CategorySchema,
   type ChangePasswordRequest,
+  CounterpartyListSchema,
+  CounterpartySchema,
+  type BulkTransactionEdit,
+  type CreateAccount,
+  type CreateCategory,
+  type CreateCounterparty,
   RekeyResponseSchema,
+  type ReplaceTransactionSplits,
   SecurityErrorSchema,
   SecuritySessionSchema,
   SecurityStateSchema,
@@ -8,6 +20,13 @@ import {
   type ServiceHealth,
   SetupPreparedSchema,
   type SetupRequest,
+  type TransactionEdit,
+  type TransactionListQuery,
+  TransactionListSchema,
+  TransactionSchema,
+  type UpdateAccount,
+  type UpdateCategory,
+  type UpdateCounterparty,
   apiPaths,
 } from "@spendlens/contracts";
 
@@ -119,6 +138,98 @@ export const api = {
       (value) => RekeyResponseSchema.parse(value).recoveryKit,
     );
   },
+  transactions(query: Partial<TransactionListQuery> = {}) {
+    return request(withQuery(apiPaths.transactions, query), (value) =>
+      TransactionListSchema.parse(value),
+    );
+  },
+  transaction(transactionId: string) {
+    return request(apiPaths.transaction(transactionId), (value) => TransactionSchema.parse(value));
+  },
+  updateTransaction(transactionId: string, changes: TransactionEdit) {
+    return mutate(
+      apiPaths.transaction(transactionId),
+      changes,
+      (value) => TransactionSchema.parse(value),
+      "PATCH",
+    );
+  },
+  replaceTransactionSplits(transactionId: string, input: ReplaceTransactionSplits) {
+    return mutate(
+      apiPaths.transactionSplits(transactionId),
+      input,
+      (value) => TransactionSchema.parse(value),
+      "PUT",
+    );
+  },
+  bulkUpdateTransactions(input: BulkTransactionEdit) {
+    return mutate(
+      apiPaths.bulkTransactions,
+      input,
+      (value) => BulkTransactionResultSchema.parse(value),
+      "PATCH",
+    );
+  },
+  confirmTransfer(transactionId: string, pairedTransactionId: string) {
+    return mutate(apiPaths.transactionTransfer(transactionId), { pairedTransactionId }, (value) =>
+      TransactionSchema.parse(value),
+    );
+  },
+  accounts() {
+    return request(apiPaths.accounts, (value) => AccountListSchema.parse(value));
+  },
+  createAccount(input: CreateAccount) {
+    return mutate(apiPaths.accounts, input, (value) => AccountSchema.parse(value));
+  },
+  updateAccount(accountId: string, input: UpdateAccount) {
+    return mutate(
+      apiPaths.account(accountId),
+      input,
+      (value) => AccountSchema.parse(value),
+      "PATCH",
+    );
+  },
+  registerOwnedAccount(
+    accountId: string,
+    input: { institutionCode: string; accountNumber: string },
+  ) {
+    return mutate(apiPaths.accountIdentifier(accountId), input, (value) =>
+      AccountSchema.parse(value),
+    );
+  },
+  categories() {
+    return request(apiPaths.categories, (value) => CategoryListSchema.parse(value));
+  },
+  createCategory(input: CreateCategory) {
+    return mutate(apiPaths.categories, input, (value) => CategorySchema.parse(value));
+  },
+  updateCategory(categoryId: string, input: UpdateCategory) {
+    return mutate(
+      apiPaths.category(categoryId),
+      input,
+      (value) => CategorySchema.parse(value),
+      "PATCH",
+    );
+  },
+  mergeCategory(categoryId: string, targetCategoryId: string) {
+    return mutate(apiPaths.mergeCategory(categoryId), { targetCategoryId }, (value) =>
+      CategorySchema.parse(value),
+    );
+  },
+  counterparties() {
+    return request(apiPaths.counterparties, (value) => CounterpartyListSchema.parse(value));
+  },
+  createCounterparty(input: CreateCounterparty) {
+    return mutate(apiPaths.counterparties, input, (value) => CounterpartySchema.parse(value));
+  },
+  updateCounterparty(counterpartyId: string, input: UpdateCounterparty) {
+    return mutate(
+      apiPaths.counterparty(counterpartyId),
+      input,
+      (value) => CounterpartySchema.parse(value),
+      "PATCH",
+    );
+  },
 };
 
 async function readJson(response: Response): Promise<unknown> {
@@ -136,4 +247,15 @@ function readCookie(name: string): string | undefined {
   const prefix = `${name}=`;
   const cookie = document.cookie.split("; ").find((entry) => entry.startsWith(prefix));
   return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : undefined;
+}
+
+function withQuery(path: string, values: object): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined && value !== null && value !== "") {
+      query.set(key, String(value));
+    }
+  }
+  const serialized = query.toString();
+  return serialized ? `${path}?${serialized}` : path;
 }

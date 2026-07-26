@@ -1,5 +1,12 @@
 import { apiPaths, ServiceHealthSchema, type ServiceHealth } from "@spendlens/contracts";
-import { AuditLog, ImportPreviewStore, ImportReconciliationStore, JobQueue } from "@spendlens/db";
+import {
+  AuditLog,
+  ImportPreviewStore,
+  ImportReconciliationStore,
+  JobQueue,
+  TransactionWorkspace,
+  WorkspaceManagement,
+} from "@spendlens/db";
 import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
 import { secureHeaders } from "hono/secure-headers";
 import { AppError } from "./api/app-error.js";
@@ -16,6 +23,7 @@ import { ImportPreviewService } from "./imports/import-service.js";
 import { createSecurityRoutes, requireApiAuthentication } from "./security/security-routes.js";
 import { registerSecurityOpenApi } from "./security/security-openapi.js";
 import type { SecurityService } from "./security/security-service.js";
+import { createTransactionRoutes } from "./transactions/transaction-routes.js";
 
 const version = "0.1.0";
 
@@ -35,6 +43,8 @@ export interface CreateAppOptions {
   audit?: AuditLog;
   importPreviews?: ImportPreviewService;
   importReconciler?: ImportReconciliationStore;
+  transactions?: TransactionWorkspace;
+  management?: WorkspaceManagement;
   importTemporaryRoot?: string;
   logger?: OperationalLogger;
 }
@@ -113,6 +123,8 @@ export function createApp(options: CreateAppOptions = {}) {
     const importPreviews =
       options.importPreviews ?? new ImportPreviewService(new ImportPreviewStore(sqlite));
     const importReconciler = options.importReconciler ?? new ImportReconciliationStore(sqlite);
+    const transactions = options.transactions ?? new TransactionWorkspace(sqlite);
+    const management = options.management ?? new WorkspaceManagement(sqlite);
 
     app.use("/api/*", requireApiAuthentication(security));
     app.route(
@@ -130,6 +142,14 @@ export function createApp(options: CreateAppOptions = {}) {
         reconciler: importReconciler,
         audit,
         ...(options.importTemporaryRoot ? { temporaryRoot: options.importTemporaryRoot } : {}),
+      }),
+    );
+    app.route(
+      "/",
+      createTransactionRoutes({
+        transactions,
+        management,
+        audit,
       }),
     );
     app.openAPIRegistry.registerComponent("securitySchemes", "sessionCookie", {

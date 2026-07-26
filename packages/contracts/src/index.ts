@@ -373,6 +373,344 @@ export const CommitImportRequestSchema = z.object({
   confirmUnreconciled: z.boolean().default(false),
 });
 
+export const TransactionDirectionSchema = z.enum(["debit", "credit"]);
+export type TransactionDirection = z.infer<typeof TransactionDirectionSchema>;
+export const TransactionScopeSchema = z.enum(["personal", "business"]);
+export type TransactionScope = z.infer<typeof TransactionScopeSchema>;
+export const TransactionReviewStateSchema = z.enum(["unreviewed", "needs_review", "reviewed"]);
+export type TransactionReviewState = z.infer<typeof TransactionReviewStateSchema>;
+export const TransactionConfidenceSchema = z.enum([
+  "unknown",
+  "low",
+  "medium",
+  "high",
+  "confirmed",
+]);
+export type TransactionConfidence = z.infer<typeof TransactionConfidenceSchema>;
+export const TransactionTypeSchema = z.enum([
+  "expense",
+  "income",
+  "transfer",
+  "refund",
+  "fee",
+  "cash_withdrawal",
+  "debt",
+  "unclassified",
+]);
+export type TransactionType = z.infer<typeof TransactionTypeSchema>;
+export const CategoryIdSchema = z.string().min(1).max(200);
+
+export const TransactionListQuerySchema = z
+  .object({
+    cursor: z.string().min(1).max(500).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(25),
+    sort: z.enum(["occurredAt", "amount", "createdAt"]).default("occurredAt"),
+    direction: z.enum(["asc", "desc"]).default("desc"),
+    search: z.string().trim().min(1).max(200).optional(),
+    startDate: z.iso.date().optional(),
+    endDate: z.iso.date().optional(),
+    accountId: z.string().uuid().optional(),
+    minimumAmountMinor: z.coerce.number().int().positive().optional(),
+    maximumAmountMinor: z.coerce.number().int().positive().optional(),
+    transactionDirection: TransactionDirectionSchema.optional(),
+    currency: CurrencyCodeSchema.optional(),
+    scope: TransactionScopeSchema.optional(),
+    categoryId: CategoryIdSchema.optional(),
+    counterpartyId: z.string().uuid().optional(),
+    confidence: TransactionConfidenceSchema.optional(),
+    reviewState: TransactionReviewStateSchema.optional(),
+  })
+  .refine(({ startDate, endDate }) => !startDate || !endDate || startDate <= endDate, {
+    message: "startDate must not be after endDate.",
+    path: ["endDate"],
+  })
+  .refine(
+    ({ minimumAmountMinor, maximumAmountMinor }) =>
+      !minimumAmountMinor || !maximumAmountMinor || minimumAmountMinor <= maximumAmountMinor,
+    {
+      message: "minimumAmountMinor must not exceed maximumAmountMinor.",
+      path: ["maximumAmountMinor"],
+    },
+  );
+
+export type TransactionListQuery = z.infer<typeof TransactionListQuerySchema>;
+
+const TransactionAccountSchema = z.object({
+  id: z.string().uuid(),
+  displayName: z.string(),
+  institutionName: z.string(),
+});
+
+const TransactionCategorySummarySchema = z.object({
+  id: CategoryIdSchema,
+  name: z.string(),
+  parentName: z.string().nullable(),
+});
+
+const TransactionCounterpartySummarySchema = z.object({
+  id: z.string().uuid(),
+  displayName: z.string(),
+});
+
+export const TransactionSplitSchema = z.object({
+  id: z.string().uuid(),
+  amountMinor: z.number().int().positive(),
+  currency: CurrencyCodeSchema,
+  category: TransactionCategorySummarySchema,
+  scope: TransactionScopeSchema,
+  note: z.string().nullable(),
+});
+
+export const TransactionSchema = z.object({
+  id: z.string().uuid(),
+  occurredAt: z.string().datetime(),
+  sourceTimestamp: z.string(),
+  sourceTimezone: z.string(),
+  account: TransactionAccountSchema,
+  direction: TransactionDirectionSchema,
+  transactionType: TransactionTypeSchema,
+  amountMinor: z.number().int().positive(),
+  currency: CurrencyCodeSchema,
+  normalizedNarration: z.string().nullable(),
+  sourceReference: z.string().nullable(),
+  category: TransactionCategorySummarySchema.nullable(),
+  counterparty: TransactionCounterpartySummarySchema.nullable(),
+  scope: TransactionScopeSchema,
+  classificationSource: z.enum([
+    "unclassified",
+    "manual",
+    "rule",
+    "history",
+    "deterministic",
+    "ai",
+  ]),
+  confidence: TransactionConfidenceSchema,
+  confidenceBasisPoints: z.number().int().min(0).max(10_000).nullable(),
+  classificationExplanation: z.string().nullable(),
+  reviewState: TransactionReviewStateSchema,
+  note: z.string().nullable(),
+  splits: z.array(TransactionSplitSchema),
+  transfer: z.object({
+    status: z.enum(["none", "suggested", "confirmed", "rejected"]),
+    pairedTransactionId: z.string().uuid().nullable(),
+  }),
+  source: z.object({
+    rawNarration: z.string().nullable(),
+    sourceTimestamp: z.string(),
+    importIds: z.array(z.string().uuid()),
+  }),
+  updatedAt: z.string().datetime(),
+});
+
+export type Transaction = z.infer<typeof TransactionSchema>;
+
+export const TransactionListSchema = z.object({
+  items: z.array(TransactionSchema),
+  nextCursor: z.string().nullable(),
+  hasMore: z.boolean(),
+});
+
+export type TransactionList = z.infer<typeof TransactionListSchema>;
+
+export const TransactionEditSchema = z
+  .object({
+    normalizedNarration: z.string().trim().min(1).max(500).nullable().optional(),
+    scope: TransactionScopeSchema.optional(),
+    categoryId: CategoryIdSchema.nullable().optional(),
+    counterpartyId: z.string().uuid().nullable().optional(),
+    transactionType: TransactionTypeSchema.optional(),
+    reviewState: TransactionReviewStateSchema.optional(),
+    note: z.string().trim().max(2_000).nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Provide at least one field to update.");
+
+export type TransactionEdit = z.infer<typeof TransactionEditSchema>;
+
+export const TransactionSplitInputSchema = z.object({
+  amountMinor: z.number().int().positive(),
+  categoryId: CategoryIdSchema,
+  scope: TransactionScopeSchema,
+  note: z.string().trim().max(500).nullable().optional(),
+});
+
+export const ReplaceTransactionSplitsSchema = z.object({
+  splits: z.array(TransactionSplitInputSchema).min(2).max(50),
+});
+
+export type ReplaceTransactionSplits = z.infer<typeof ReplaceTransactionSplitsSchema>;
+
+export const BulkTransactionEditSchema = z.object({
+  transactionIds: z.array(z.string().uuid()).min(1).max(100),
+  changes: z
+    .object({
+      scope: TransactionScopeSchema.optional(),
+      categoryId: CategoryIdSchema.nullable().optional(),
+      transactionType: TransactionTypeSchema.optional(),
+      reviewState: TransactionReviewStateSchema.optional(),
+    })
+    .refine((value) => Object.keys(value).length > 0, "Provide at least one bulk change."),
+});
+export type BulkTransactionEdit = z.infer<typeof BulkTransactionEditSchema>;
+
+export const BulkTransactionResultSchema = z.object({
+  updatedCount: z.number().int().nonnegative(),
+  transactionIds: z.array(z.string().uuid()),
+});
+
+export const AccountTypeSchema = z.enum([
+  "wallet",
+  "current",
+  "savings",
+  "business",
+  "loan",
+  "cash",
+  "other",
+]);
+export type AccountType = z.infer<typeof AccountTypeSchema>;
+
+export const AccountSchema = z.object({
+  id: z.string().uuid(),
+  institutionName: z.string(),
+  institutionCode: z.string().nullable(),
+  displayName: z.string(),
+  accountType: AccountTypeSchema,
+  baseCurrency: CurrencyCodeSchema,
+  maskedAccountNumber: z.string().nullable(),
+  isOwned: z.boolean(),
+  archivedAt: z.string().datetime().nullable(),
+  transactionCount: z.number().int().nonnegative(),
+});
+export type Account = z.infer<typeof AccountSchema>;
+
+export const AccountListSchema = z.object({ items: z.array(AccountSchema) });
+
+export const CreateAccountSchema = z.object({
+  institutionName: z.string().trim().min(1).max(120),
+  institutionCode: z.string().trim().min(1).max(80).nullable().optional(),
+  displayName: z.string().trim().min(1).max(120),
+  accountType: AccountTypeSchema.default("other"),
+  baseCurrency: CurrencyCodeSchema,
+  isOwned: z.boolean().default(true),
+});
+export type CreateAccount = z.infer<typeof CreateAccountSchema>;
+
+export const UpdateAccountSchema = z
+  .object({
+    institutionName: z.string().trim().min(1).max(120).optional(),
+    institutionCode: z.string().trim().min(1).max(80).nullable().optional(),
+    displayName: z.string().trim().min(1).max(120).optional(),
+    accountType: AccountTypeSchema.optional(),
+    isOwned: z.boolean().optional(),
+    archived: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Provide at least one account change.");
+export type UpdateAccount = z.infer<typeof UpdateAccountSchema>;
+
+export const RegisterOwnedAccountSchema = z.object({
+  institutionCode: z.string().trim().min(1).max(80),
+  accountNumber: z.string().trim().min(4).max(64),
+});
+
+export const CategoryFlagsSchema = z.object({
+  isIncome: z.boolean().default(false),
+  isExpense: z.boolean().default(false),
+  isTransfer: z.boolean().default(false),
+  isEssential: z.boolean().default(false),
+  isDiscretionary: z.boolean().default(false),
+  isSavings: z.boolean().default(false),
+  isRefund: z.boolean().default(false),
+  isFee: z.boolean().default(false),
+  isCashWithdrawal: z.boolean().default(false),
+});
+
+export const CategorySchema = z.object({
+  id: CategoryIdSchema,
+  parentId: CategoryIdSchema.nullable(),
+  systemKey: z.string().nullable(),
+  slug: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  archivedAt: z.string().datetime().nullable(),
+  transactionCount: z.number().int().nonnegative(),
+  flags: CategoryFlagsSchema,
+});
+export type Category = z.infer<typeof CategorySchema>;
+
+export const CategoryListSchema = z.object({ items: z.array(CategorySchema) });
+
+export const CreateCategorySchema = z
+  .object({
+    name: z.string().trim().min(1).max(100),
+    description: z.string().trim().max(500).nullable().optional(),
+    parentId: CategoryIdSchema.nullable().optional(),
+    flags: CategoryFlagsSchema.partial().optional(),
+  })
+  .refine(
+    ({ flags }) => !(flags?.isEssential && flags?.isDiscretionary),
+    "A category cannot be both essential and discretionary.",
+  );
+export type CreateCategory = z.infer<typeof CreateCategorySchema>;
+
+export const UpdateCategorySchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).optional(),
+    description: z.string().trim().max(500).nullable().optional(),
+    parentId: CategoryIdSchema.nullable().optional(),
+    archived: z.boolean().optional(),
+    flags: CategoryFlagsSchema.partial().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Provide at least one category change.")
+  .refine(
+    ({ flags }) => !(flags?.isEssential && flags?.isDiscretionary),
+    "A category cannot be both essential and discretionary.",
+  );
+export type UpdateCategory = z.infer<typeof UpdateCategorySchema>;
+
+export const MergeCategorySchema = z.object({
+  targetCategoryId: CategoryIdSchema,
+});
+
+export const CounterpartyKindSchema = z.enum([
+  "person",
+  "business",
+  "merchant",
+  "bank",
+  "government",
+  "unknown",
+]);
+
+export const CounterpartySchema = z.object({
+  id: z.string().uuid(),
+  displayName: z.string(),
+  kind: CounterpartyKindSchema,
+  institutionName: z.string().nullable(),
+  maskedAccountNumber: z.string().nullable(),
+  transactionCount: z.number().int().nonnegative(),
+});
+export type Counterparty = z.infer<typeof CounterpartySchema>;
+
+export const CounterpartyListSchema = z.object({ items: z.array(CounterpartySchema) });
+
+export const CreateCounterpartySchema = z.object({
+  displayName: z.string().trim().min(1).max(160),
+  kind: CounterpartyKindSchema.default("unknown"),
+  institutionName: z.string().trim().max(120).nullable().optional(),
+});
+export type CreateCounterparty = z.infer<typeof CreateCounterpartySchema>;
+
+export const UpdateCounterpartySchema = z
+  .object({
+    displayName: z.string().trim().min(1).max(160).optional(),
+    kind: CounterpartyKindSchema.optional(),
+    institutionName: z.string().trim().max(120).nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Provide at least one counterparty change.");
+export type UpdateCounterparty = z.infer<typeof UpdateCounterpartySchema>;
+
+export const ConfirmTransferSchema = z.object({
+  pairedTransactionId: z.string().uuid(),
+});
+
 export const apiPaths = {
   live: "/health/live",
   ready: "/health/ready",
@@ -394,4 +732,17 @@ export const apiPaths = {
   commitImport: (importId: string) => `/api/imports/previews/${importId}/commit`,
   deleteImport: (importId: string) => `/api/imports/${importId}`,
   importProgress: (importId: string) => `/api/imports/${importId}/progress`,
+  transactions: "/api/transactions",
+  transaction: (transactionId: string) => `/api/transactions/${transactionId}`,
+  transactionSplits: (transactionId: string) => `/api/transactions/${transactionId}/splits`,
+  transactionTransfer: (transactionId: string) => `/api/transactions/${transactionId}/transfer`,
+  bulkTransactions: "/api/transactions/bulk",
+  accounts: "/api/accounts",
+  account: (accountId: string) => `/api/accounts/${accountId}`,
+  accountIdentifier: (accountId: string) => `/api/accounts/${accountId}/identifiers`,
+  categories: "/api/categories",
+  category: (categoryId: string) => `/api/categories/${categoryId}`,
+  mergeCategory: (categoryId: string) => `/api/categories/${categoryId}/merge`,
+  counterparties: "/api/counterparties",
+  counterparty: (counterpartyId: string) => `/api/counterparties/${counterpartyId}`,
 } as const;
