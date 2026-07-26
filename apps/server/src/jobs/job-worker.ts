@@ -119,10 +119,18 @@ export class JobWorker {
       if (error instanceof JobLeaseLostError) {
         return this.#queue.get(job.workspaceId, job.id);
       }
+      const typedFailure =
+        error instanceof Error &&
+        "code" in error &&
+        typeof error.code === "string" &&
+        "retryable" in error &&
+        typeof error.retryable === "boolean"
+          ? { code: error.code, message: error.message, retryable: error.retryable }
+          : null;
       this.#queue.fail(job.id, this.#workerId, {
-        code: "JOB_HANDLER_FAILED",
-        message: "The background task could not be completed.",
-        retryable: true,
+        code: typedFailure?.code ?? "JOB_HANDLER_FAILED",
+        message: typedFailure?.message ?? "The background task could not be completed.",
+        retryable: typedFailure?.retryable ?? true,
         retryDelayMs: Math.min(30_000, 1_000 * 2 ** Math.max(0, job.attempts - 1)),
       });
     }

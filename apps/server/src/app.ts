@@ -1,5 +1,7 @@
-import { apiPaths, ServiceHealthSchema, type ServiceHealth } from "@spendlens/contracts";
+import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
+import { apiPaths, type ServiceHealth, ServiceHealthSchema } from "@spendlens/contracts";
 import {
+  AiProviderStore,
   AuditLog,
   ClassificationEngine,
   ClassificationReview,
@@ -9,8 +11,9 @@ import {
   TransactionWorkspace,
   WorkspaceManagement,
 } from "@spendlens/db";
-import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
 import { secureHeaders } from "hono/secure-headers";
+import { AiClassificationService } from "./ai/ai-classification-service.js";
+import { createAiRoutes } from "./ai/ai-routes.js";
 import { AppError } from "./api/app-error.js";
 import { createErrorHandler } from "./api/error-handler.js";
 import { createInfrastructureRoutes } from "./api/infrastructure-routes.js";
@@ -23,8 +26,8 @@ import type { AppEnv } from "./api/request-context.js";
 import { createClassificationRoutes } from "./classification/classification-routes.js";
 import { createImportRoutes } from "./imports/import-routes.js";
 import { ImportPreviewService } from "./imports/import-service.js";
-import { createSecurityRoutes, requireApiAuthentication } from "./security/security-routes.js";
 import { registerSecurityOpenApi } from "./security/security-openapi.js";
+import { createSecurityRoutes, requireApiAuthentication } from "./security/security-routes.js";
 import type { SecurityService } from "./security/security-service.js";
 import { createTransactionRoutes } from "./transactions/transaction-routes.js";
 
@@ -50,6 +53,8 @@ export interface CreateAppOptions {
   management?: WorkspaceManagement;
   classification?: ClassificationEngine;
   classificationReview?: ClassificationReview;
+  aiProviders?: AiProviderStore;
+  aiClassification?: AiClassificationService;
   importTemporaryRoot?: string;
   logger?: OperationalLogger;
 }
@@ -133,6 +138,24 @@ export function createApp(options: CreateAppOptions = {}) {
     const classification = options.classification ?? new ClassificationEngine(sqlite);
     const classificationReview =
       options.classificationReview ?? new ClassificationReview(sqlite, classification);
+    const aiProviders =
+      options.aiProviders ??
+      new AiProviderStore({
+        sqlite,
+        credentialStorage:
+          security.keyProviderKind === "keyring" ? "keyring" : "encrypted_database",
+        encryptionKey: () => security.aiCredentialKey(),
+      });
+    const aiClassification =
+      options.aiClassification ??
+      new AiClassificationService({
+        sqlite,
+        providers: aiProviders,
+        transactions,
+      });
+    security.registerDatabaseRekeyHook((previousKey, nextKey) =>
+      aiProviders.rotateEncryptionKey(previousKey, nextKey),
+    );
 
     app.use("/api/*", requireApiAuthentication(security));
     app.route(
@@ -166,6 +189,15 @@ export function createApp(options: CreateAppOptions = {}) {
       createClassificationRoutes({
         engine: classification,
         review: classificationReview,
+        audit,
+      }),
+    );
+    app.route(
+      "/",
+      createAiRoutes({
+        providers: aiProviders,
+        classification: aiClassification,
+        jobs,
         audit,
       }),
     );

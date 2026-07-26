@@ -52,6 +52,7 @@ interface MutableGroup {
 
 interface TransactionSnapshot {
   id: string;
+  aiSuggestionId?: string | null;
   transaction: {
     categoryId: string | null;
     counterpartyId: string | null;
@@ -445,19 +446,29 @@ export class ClassificationReview {
           t.counterparty_id,
           counterparty.display_name AS counterparty_name,
           t.review_state,
-          decision.confidence,
-          decision.suggestion,
+          coalesce(ai.confidence, decision.confidence) AS confidence,
+          coalesce(ai.suggestion, decision.suggestion) AS suggestion,
           decision.conflict_rule_ids,
-          decision.evidence
+          coalesce(ai.evidence, decision.evidence) AS evidence
         FROM transactions t
         JOIN accounts account ON account.id = t.account_id
         JOIN classification_decisions decision ON decision.transaction_id = t.id
         LEFT JOIN categories category ON category.id = t.category_id
         LEFT JOIN counterparties counterparty ON counterparty.id = t.counterparty_id
+        LEFT JOIN ai_classification_suggestions ai ON ai.id = (
+          SELECT suggestion.id
+          FROM ai_classification_suggestions suggestion
+          WHERE suggestion.workspace_id = t.workspace_id
+            AND suggestion.transaction_id = t.id
+            AND suggestion.input_updated_at = t.updated_at
+          ORDER BY suggestion.created_at DESC, suggestion.id DESC
+          LIMIT 1
+        )
         WHERE t.workspace_id = ?
           AND (
             t.review_state = 'needs_review'
             OR (decision.needs_review = 1 AND t.review_state <> 'reviewed')
+            OR (ai.id IS NOT NULL AND t.review_state <> 'reviewed')
           )
         ORDER BY t.occurred_at_utc ASC, t.id ASC`,
       )
@@ -466,7 +477,21 @@ export class ClassificationReview {
 
   #suggestionFor(transactionId: string): ClassificationSuggestion | null {
     const row = this.#sqlite()
-      .prepare("SELECT suggestion FROM classification_decisions WHERE transaction_id = ?")
+      .prepare(
+        `SELECT coalesce(ai.suggestion, decision.suggestion) AS suggestion
+         FROM transactions transaction_row
+         JOIN classification_decisions decision
+           ON decision.transaction_id = transaction_row.id
+         LEFT JOIN ai_classification_suggestions ai ON ai.id = (
+           SELECT suggestion_row.id
+           FROM ai_classification_suggestions suggestion_row
+           WHERE suggestion_row.transaction_id = transaction_row.id
+             AND suggestion_row.input_updated_at = transaction_row.updated_at
+           ORDER BY suggestion_row.created_at DESC, suggestion_row.id DESC
+           LIMIT 1
+         )
+         WHERE transaction_row.id = ?`,
+      )
       .get(transactionId) as { suggestion: string | null } | undefined;
     return row?.suggestion
       ? ClassificationSuggestionSchema.parse(JSON.parse(row.suggestion))
@@ -626,11 +651,28 @@ export class ClassificationReview {
       )
       .get(transactionId) as TransactionSnapshot["decision"];
     const { id, ...values } = transaction;
-    return { id, transaction: values, decision: decision ?? null };
+    const aiSuggestion = this.#sqlite()
+      .prepare(
+        `SELECT suggestion.id
+         FROM ai_classification_suggestions suggestion
+         JOIN transactions transaction_row ON transaction_row.id = suggestion.transaction_id
+         WHERE suggestion.transaction_id = ?
+           AND suggestion.input_updated_at = transaction_row.updated_at
+         ORDER BY suggestion.created_at DESC, suggestion.id DESC
+         LIMIT 1`,
+      )
+      .get(transactionId) as { id: string } | undefined;
+    return {
+      id,
+      aiSuggestionId: aiSuggestion?.id ?? null,
+      transaction: values,
+      decision: decision ?? null,
+    };
   }
 
   #restoreSnapshot(workspaceId: string, snapshot: TransactionSnapshot): void {
     const transaction = snapshot.transaction;
+    const restoredAt = this.#clock();
     this.#sqlite()
       .prepare(
         `UPDATE transactions SET
@@ -656,10 +698,19 @@ export class ClassificationReview {
         transaction.confidenceBasisPoints,
         transaction.classificationExplanation,
         transaction.reviewState,
-        this.#clock(),
+        restoredAt,
         workspaceId,
         snapshot.id,
       );
+    if (snapshot.aiSuggestionId) {
+      this.#sqlite()
+        .prepare(
+          `UPDATE ai_classification_suggestions
+           SET input_updated_at = ?
+           WHERE workspace_id = ? AND transaction_id = ? AND id = ?`,
+        )
+        .run(restoredAt, workspaceId, snapshot.id, snapshot.aiSuggestionId);
+    }
     if (!snapshot.decision) {
       this.#sqlite()
         .prepare("DELETE FROM classification_decisions WHERE transaction_id = ?")
@@ -698,7 +749,7 @@ export class ClassificationReview {
         decision.conflictRuleIds,
         decision.evidence,
         decision.needsReview,
-        decision.evaluatedAt,
+        restoredAt,
       );
   }
 

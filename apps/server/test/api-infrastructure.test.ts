@@ -1,9 +1,12 @@
-import { mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AccountSchema,
-  apiPaths,
+  AiPayloadPreviewSchema,
+  AiProviderListSchema,
+  AiProviderSettingSchema,
   ApiErrorSchema,
+  apiPaths,
   BulkTransactionResultSchema,
   CategorySchema,
   ClassificationPreviewSchema,
@@ -21,9 +24,9 @@ import {
 } from "@spendlens/contracts";
 import { AuditLog, JobQueue, MemoryKeyProvider, starterCategoryId } from "@spendlens/db";
 import { afterEach, describe, expect, it } from "vitest";
-import { createApp } from "../src/app.js";
 import { AppError } from "../src/api/app-error.js";
 import { createJsonLogger } from "../src/api/operational-logger.js";
+import { createApp } from "../src/app.js";
 import { JobWorker } from "../src/jobs/job-worker.js";
 import { CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE } from "../src/security/security-routes.js";
 import { SecurityService } from "../src/security/security-service.js";
@@ -71,6 +74,11 @@ describe("OpenAPI and structured API behavior", () => {
     expect(document.paths).toHaveProperty("/api/classification/rules/reorder");
     expect(document.paths).toHaveProperty("/api/classification/review");
     expect(document.paths).toHaveProperty("/api/classification/review/decisions");
+    expect(document.paths).toHaveProperty("/api/ai/providers");
+    expect(document.paths).toHaveProperty("/api/ai/providers/{providerSettingId}/payload-preview");
+    expect(document.paths).toHaveProperty("/api/ai/providers/{providerSettingId}/test");
+    expect(document.paths).toHaveProperty("/api/ai/providers/{providerSettingId}/models");
+    expect(document.paths).toHaveProperty("/api/ai/classification-jobs");
 
     const invalid = await fixture.app.request("/api/jobs/not-a-uuid", {
       headers: fixture.authHeaders(),
@@ -440,6 +448,8 @@ describe("privacy-safe logs and audit events", () => {
       narration: "PRIVATE TRANSFER NARRATION",
       accountNumber: "0123456789",
       providerToken: "sk-private-key",
+      apiKey: "provider-api-key-camel-case",
+      api_key: "provider-api-key-snake-case",
       key: Buffer.from("cryptographic-key-material"),
     });
 
@@ -448,6 +458,8 @@ describe("privacy-safe logs and audit events", () => {
     expect(captured).not.toContain("PRIVATE TRANSFER NARRATION");
     expect(captured).not.toContain("0123456789");
     expect(captured).not.toContain("sk-private-key");
+    expect(captured).not.toContain("provider-api-key-camel-case");
+    expect(captured).not.toContain("provider-api-key-snake-case");
     expect(captured).not.toContain("cryptographic-key-material");
     expect(captured).toContain("[REDACTED]");
     fixture.close();
@@ -833,6 +845,120 @@ describe("classification and grouped review API", () => {
       )
       .get(fixture.workspaceId) as { count: number };
     expect(relatedAuditCount.count).toBeGreaterThan(0);
+    fixture.close();
+  });
+});
+
+describe("AI provider and privacy API", () => {
+  it("configures a local provider, previews policy, queues a grouped job, and supports cancellation", async () => {
+    const fixture = await initializedFixture();
+    const accountResponse = await fixture.app.request(apiPaths.accounts, {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        institutionName: "PalmPay",
+        institutionCode: "palmpay",
+        displayName: "PalmPay wallet",
+        accountType: "wallet",
+        baseCurrency: "NGN",
+        isOwned: true,
+      }),
+    });
+    const account = AccountSchema.parse(await accountResponse.json());
+    const transactionId = insertApiTransaction(fixture, account.id, {
+      amountMinor: 25_000,
+      narration: "Lunch transfer 1234567890",
+      rawNarration: "Raw lunch transfer 1234567890",
+    });
+
+    const createResponse = await fixture.app.request(apiPaths.aiProviders, {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        name: "Local Ollama",
+        provider: "ollama",
+        endpoint: "http://127.0.0.1:11434",
+        model: "llama3.2",
+        timeoutMs: 30_000,
+        enabled: true,
+        localModel: true,
+        payloadPolicy: "local_full",
+        acknowledgeRemotePayload: true,
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const provider = AiProviderSettingSchema.parse(await createResponse.json());
+    expect(provider).toMatchObject({
+      provider: "ollama",
+      enabled: true,
+      localModel: true,
+      hasCredential: false,
+    });
+
+    const listResponse = await fixture.app.request(apiPaths.aiProviders, {
+      headers: fixture.authHeaders(),
+    });
+    expect(AiProviderListSchema.parse(await listResponse.json())).toMatchObject({
+      providersDisabled: false,
+      items: [{ id: provider.id }],
+    });
+    const previewResponse = await fixture.app.request(
+      apiPaths.aiProviderPayloadPreview(provider.id),
+      { headers: fixture.authHeaders() },
+    );
+    expect(AiPayloadPreviewSchema.parse(await previewResponse.json())).toMatchObject({
+      policy: "local_full",
+      localModel: true,
+      omittedFields: [],
+    });
+
+    const queuedResponse = await fixture.app.request(apiPaths.aiClassificationJobs, {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        providerSettingId: provider.id,
+        transactionIds: [transactionId],
+      }),
+    });
+    expect(queuedResponse.status).toBe(202);
+    const job = JobSchema.parse(await queuedResponse.json());
+    expect(job).toMatchObject({ type: "classification.ai", status: "queued" });
+    const cancelResponse = await fixture.app.request(apiPaths.cancelJob(job.id), {
+      method: "POST",
+      headers: fixture.authHeaders(true),
+    });
+    expect(JobSchema.parse(await cancelResponse.json()).status).toBe("cancelled");
+    expect(
+      fixture.audit
+        .listForEntity(fixture.workspaceId, "ai_provider_setting", provider.id)
+        .map(({ action }) => action),
+    ).toContain("ai_provider.created");
+    fixture.close();
+  });
+
+  it("requires remote payload acknowledgement before enablement", async () => {
+    const fixture = await initializedFixture();
+    const response = await fixture.app.request(apiPaths.aiProviders, {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        name: "Remote provider",
+        provider: "openai_compatible",
+        endpoint: "https://provider.example/v1",
+        model: "model",
+        timeoutMs: 30_000,
+        enabled: true,
+        localModel: false,
+        payloadPolicy: "remote_redacted",
+        apiKey: "not-stored-because-validation-fails",
+        acknowledgeRemotePayload: false,
+      }),
+    });
+    expect(response.status).toBe(400);
+    expect(ApiErrorSchema.parse(await response.json()).error.code).toBe("VALIDATION_FAILED");
+    expect(
+      fixture.sqlite.prepare("SELECT COUNT(*) AS count FROM ai_provider_settings").get(),
+    ).toEqual({ count: 0 });
     fixture.close();
   });
 });

@@ -1,5 +1,6 @@
 import {
   ArrowCounterClockwise,
+  Brain,
   CaretDown,
   CaretUp,
   CheckCircle,
@@ -7,6 +8,7 @@ import {
   MagicWand,
   PencilSimple,
   Sparkle,
+  StopCircle,
   Warning,
 } from "@phosphor-icons/react";
 import type {
@@ -18,7 +20,7 @@ import type {
   TransactionType,
 } from "@spendlens/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -46,10 +48,22 @@ export function ReviewPage() {
     queryKey: ["counterparties"],
     queryFn: api.counterparties,
   });
+  const providersQuery = useQuery({ queryKey: ["ai-providers"], queryFn: api.aiProviders });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Record<string, Set<string>>>({});
   const [editor, setEditor] = useState<DecisionEditorState | null>(null);
   const [undoAction, setUndoAction] = useState<{ id: string; count: number } | null>(null);
+  const [aiEditorOpen, setAiEditorOpen] = useState(false);
+  const [aiJobId, setAiJobId] = useState<string | null>(null);
+  const aiJobQuery = useQuery({
+    queryKey: ["job", aiJobId],
+    queryFn: () => api.job(aiJobId as string),
+    enabled: Boolean(aiJobId),
+    refetchInterval: (query) =>
+      query.state.data && ["succeeded", "failed", "cancelled"].includes(query.state.data.status)
+        ? false
+        : 1_000,
+  });
 
   const refresh = async () => {
     await Promise.all([
@@ -78,9 +92,26 @@ export function ReviewPage() {
       await refresh();
     },
   });
+  const cancelAiMutation = useMutation({
+    mutationFn: api.cancelJob,
+    onSuccess: (job) => queryClient.setQueryData(["job", job.id], job),
+  });
+
+  useEffect(() => {
+    if (aiJobQuery.data?.status !== "succeeded") return;
+    void queryClient.invalidateQueries({ queryKey: ["classification-review"] });
+  }, [aiJobQuery.data?.status, queryClient]);
 
   const groups = groupsQuery.data?.items ?? [];
   const total = groupsQuery.data?.totalTransactions ?? 0;
+  const enabledProviders = useMemo(
+    () => providersQuery.data?.items.filter(({ enabled }) => enabled) ?? [],
+    [providersQuery.data?.items],
+  );
+  const aiTransactionIds = useMemo(
+    () => selectedTransactionIds(groups, selected),
+    [groups, selected],
+  );
 
   function toggleExpanded(key: string) {
     setExpanded((current) => {
@@ -111,11 +142,58 @@ export function ReviewPage() {
             current matches, or future matches.
           </p>
         </div>
-        <div className="rounded-xl border bg-muted/30 px-4 py-3">
-          <p className="font-tabular text-2xl font-semibold">{total}</p>
-          <p className="text-xs text-muted-foreground">transactions need attention</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <Button
+            variant="outline"
+            disabled={
+              total === 0 || !providersQuery.data?.items.some((provider) => provider.enabled)
+            }
+            onClick={() => setAiEditorOpen(true)}
+          >
+            <Brain />
+            Suggest with AI
+          </Button>
+          <div className="rounded-xl border bg-muted/30 px-4 py-3">
+            <p className="font-tabular text-2xl font-semibold">{total}</p>
+            <p className="text-xs text-muted-foreground">transactions need attention</p>
+          </div>
         </div>
       </header>
+
+      {aiJobQuery.data && (
+        <div className="rounded-xl border border-primary/25 bg-primary/5 p-4">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+            <div>
+              <p className="text-sm font-medium">
+                {aiJobQuery.data.status === "succeeded"
+                  ? "AI suggestions are ready in Review"
+                  : aiJobQuery.data.status === "failed"
+                    ? "AI classification failed"
+                    : aiJobQuery.data.status === "cancelled"
+                      ? "AI classification cancelled"
+                      : (aiJobQuery.data.progressMessage ?? "AI classification queued")}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {Math.round(aiJobQuery.data.progressBasisPoints / 100)}% · Suggestions never apply
+                without your confirmation.
+              </p>
+              {aiJobQuery.data.error && (
+                <p className="mt-2 text-xs text-danger">{aiJobQuery.data.error.message}</p>
+              )}
+            </div>
+            {["queued", "running"].includes(aiJobQuery.data.status) && (
+              <Button
+                variant="outline"
+                disabled={cancelAiMutation.isPending}
+                onClick={() => cancelAiMutation.mutate(aiJobQuery.data.id)}
+              >
+                <StopCircle />
+                Cancel
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {undoAction && (
         <div className="flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -294,7 +372,95 @@ export function ReviewPage() {
           await refresh();
         }}
       />
+      <AiClassificationEditor
+        open={aiEditorOpen}
+        providers={enabledProviders}
+        transactionIds={aiTransactionIds}
+        onClose={() => setAiEditorOpen(false)}
+        onQueued={(jobId) => {
+          setAiEditorOpen(false);
+          setAiJobId(jobId);
+        }}
+      />
     </div>
+  );
+}
+
+function AiClassificationEditor({
+  open,
+  providers,
+  transactionIds,
+  onClose,
+  onQueued,
+}: {
+  open: boolean;
+  providers: Array<{ id: string; name: string; model: string; localModel: boolean }>;
+  transactionIds: string[];
+  onClose(): void;
+  onQueued(jobId: string): void;
+}) {
+  const [providerSettingId, setProviderSettingId] = useState("");
+  useEffect(() => {
+    if (open) setProviderSettingId(providers[0]?.id ?? "");
+  }, [open, providers]);
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.startAiClassification({
+        providerSettingId,
+        transactionIds: transactionIds.slice(0, 500),
+      }),
+    onSuccess: (job) => onQueued(job.id),
+  });
+
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title="Suggest classifications with AI"
+      description="The selected provider will analyze this unresolved group. Every result returns here for review."
+    >
+      <div className="space-y-5 p-5">
+        <div className="rounded-xl border bg-muted/20 p-4">
+          <p className="font-tabular text-2xl font-semibold">
+            {Math.min(500, transactionIds.length)}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {transactionIds.length > 500
+              ? "transactions in this job; the first 500 are included"
+              : "transactions included in this grouped job"}
+          </p>
+        </div>
+        <Field label="Provider">
+          <Select
+            value={providerSettingId}
+            onChange={(event) => setProviderSettingId(event.target.value)}
+          >
+            {providers.map((provider) => (
+              <option key={provider.id} value={provider.id}>
+                {provider.name} · {provider.model} {provider.localModel ? "(local)" : "(remote)"}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs leading-5">
+          Remote providers receive only the redacted payload shown in Settings. Local providers may
+          receive complete parsed context. No suggestion changes a transaction automatically.
+        </div>
+        {mutation.error && <p className="text-sm text-danger">{errorMessage(mutation.error)}</p>}
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!providerSettingId || transactionIds.length === 0 || mutation.isPending}
+            onClick={() => mutation.mutate()}
+          >
+            <Brain />
+            {mutation.isPending ? "Queueing…" : "Queue AI suggestions"}
+          </Button>
+        </div>
+      </div>
+    </Sheet>
   );
 }
 
@@ -610,6 +776,16 @@ function describeSuggestion(
     suggestion.scope,
   ].filter(Boolean);
   return values.join(" · ") || "Preserve the suggested classification.";
+}
+
+function selectedTransactionIds(
+  groups: ReviewGroup[],
+  selected: Record<string, Set<string>>,
+): string[] {
+  const explicit = [...new Set(Object.values(selected).flatMap((ids) => [...ids]))];
+  return explicit.length > 0
+    ? explicit
+    : [...new Set(groups.flatMap((group) => group.transactions.map(({ id }) => id)))];
 }
 
 function errorMessage(error: unknown): string {

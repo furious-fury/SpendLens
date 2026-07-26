@@ -7,9 +7,10 @@ import {
   Key,
   SignOut,
 } from "@phosphor-icons/react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { RecoveryKit } from "@spendlens/contracts";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
+import { AiProviderSettings } from "@/components/ai-provider-settings";
 import { downloadRecoveryFile, useSecurity } from "@/components/security-gate";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -117,6 +118,8 @@ export function SecuritySettingsPage() {
           </form>
         </CardContent>
       </Card>
+
+      <AiProviderSettings />
 
       <Card>
         <CardHeader>

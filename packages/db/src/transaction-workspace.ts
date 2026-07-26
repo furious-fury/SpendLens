@@ -80,7 +80,15 @@ export interface TransactionRecord {
     evidence: Array<{
       code: string;
       label: string;
-      source: "manual" | "transfer" | "rule" | "counterparty" | "bank" | "history" | "fallback";
+      source:
+        | "manual"
+        | "transfer"
+        | "rule"
+        | "counterparty"
+        | "bank"
+        | "history"
+        | "ai"
+        | "fallback";
       ruleId?: string | null | undefined;
     }>;
   } | null;
@@ -224,9 +232,16 @@ function parseClassificationEvidence(
         item !== null &&
         typeof (item as { code?: unknown }).code === "string" &&
         typeof (item as { label?: unknown }).label === "string" &&
-        ["manual", "transfer", "rule", "counterparty", "bank", "history", "fallback"].includes(
-          String((item as { source?: unknown }).source),
-        ),
+        [
+          "manual",
+          "transfer",
+          "rule",
+          "counterparty",
+          "bank",
+          "history",
+          "ai",
+          "fallback",
+        ].includes(String((item as { source?: unknown }).source)),
     );
   } catch {
     return [];

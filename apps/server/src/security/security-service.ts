@@ -9,14 +9,16 @@ import type {
 } from "@spendlens/contracts";
 import {
   AuditLog,
+  createEncryptedDatabase,
   type DatabaseKeyProvider,
   databaseExists,
+  deriveAiCredentialKey,
   type EncryptedDatabase,
   type EncryptedDatabaseOptions,
-  createEncryptedDatabase,
+  generateDatabaseKey,
   openEncryptedDatabase,
-  seedStarterTaxonomy,
   securityEvents,
+  seedStarterTaxonomy,
   sessions,
   users,
   workspaces,
@@ -57,11 +59,14 @@ export interface AuthenticatedSession {
   user: AuthenticatedUser;
 }
 
+export type DatabaseRekeyHook = (previousKey: Buffer, nextKey: Buffer) => void | Promise<void>;
+
 export class SecurityService {
   readonly #databaseOptions: EncryptedDatabaseOptions;
   readonly #setupToken: SetupTokenManager;
   readonly #clock: () => number;
   readonly #rateLimiter: LoginRateLimiter;
+  readonly #databaseRekeyHooks = new Set<DatabaseRekeyHook>();
   #database: EncryptedDatabase | null = null;
 
   private constructor(options: SecurityServiceOptions) {
@@ -97,6 +102,15 @@ export class SecurityService {
 
   get sqlite(): EncryptedDatabase["sqlite"] | null {
     return this.#database?.sqlite ?? null;
+  }
+
+  aiCredentialKey(): Buffer {
+    return deriveAiCredentialKey(this.#readyDatabase().key);
+  }
+
+  registerDatabaseRekeyHook(hook: DatabaseRekeyHook): () => void {
+    this.#databaseRekeyHooks.add(hook);
+    return () => this.#databaseRekeyHooks.delete(hook);
   }
 
   async state(sessionToken?: string): Promise<SecurityState> {
@@ -414,7 +428,28 @@ export class SecurityService {
       throw new SecurityError("INVALID_CREDENTIALS", "The password is incorrect.", 401);
     }
 
-    await database.rekey();
+    const nextDatabaseKey = generateDatabaseKey();
+    const previousCredentialKey = deriveAiCredentialKey(database.key);
+    const nextCredentialKey = deriveAiCredentialKey(nextDatabaseKey);
+    const completedHooks: DatabaseRekeyHook[] = [];
+    try {
+      for (const hook of this.#databaseRekeyHooks) {
+        await hook(previousCredentialKey, nextCredentialKey);
+        completedHooks.push(hook);
+      }
+      await database.rekey(nextDatabaseKey);
+    } catch (error) {
+      for (const hook of completedHooks.reverse()) {
+        await Promise.resolve(hook(nextCredentialKey, previousCredentialKey)).catch(
+          () => undefined,
+        );
+      }
+      throw error;
+    } finally {
+      nextDatabaseKey.fill(0);
+      previousCredentialKey.fill(0);
+      nextCredentialKey.fill(0);
+    }
     this.#recordEvent("database.rekey", "success", remoteAddress, user.workspaceId, user.id);
     this.#audit().record({
       workspaceId: user.workspaceId,

@@ -61,6 +61,7 @@ describe("financial domain migration", () => {
       { id: "0004_import_reconciliation" },
       { id: "0005_transaction_workspace" },
       { id: "0006_classification_rules_review" },
+      { id: "0007_ai_providers_privacy" },
     ]);
     sqlite.close();
   });

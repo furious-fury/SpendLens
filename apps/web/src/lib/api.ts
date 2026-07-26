@@ -1,6 +1,14 @@
 import {
   AccountListSchema,
   AccountSchema,
+  type AiClassificationJobRequest,
+  AiConnectionTestSchema,
+  AiModelListSchema,
+  AiPayloadPreviewSchema,
+  type AiProviderInput,
+  AiProviderListSchema,
+  AiProviderSettingSchema,
+  type AiProviderUpdate,
   type ApplyReviewDecision,
   apiPaths,
   type BulkTransactionEdit,
@@ -18,6 +26,7 @@ import {
   type CreateCategory,
   type CreateClassificationRule,
   type CreateCounterparty,
+  JobSchema,
   RekeyResponseSchema,
   type ReplaceTransactionSplits,
   ReviewDecisionResultSchema,
@@ -290,6 +299,51 @@ export const api = {
     return mutate(apiPaths.undoReviewDecision(actionId), undefined, (value) =>
       UndoReviewDecisionResultSchema.parse(value),
     );
+  },
+  aiProviders() {
+    return request(apiPaths.aiProviders, (value) => AiProviderListSchema.parse(value));
+  },
+  createAiProvider(input: AiProviderInput) {
+    return mutate(apiPaths.aiProviders, input, (value) => AiProviderSettingSchema.parse(value));
+  },
+  updateAiProvider(providerSettingId: string, input: AiProviderUpdate) {
+    return mutate(
+      apiPaths.aiProvider(providerSettingId),
+      input,
+      (value) => AiProviderSettingSchema.parse(value),
+      "PATCH",
+    );
+  },
+  async deleteAiProvider(providerSettingId: string) {
+    return request(
+      apiPaths.aiProvider(providerSettingId),
+      (value) => AiProviderSettingSchema.parse(value),
+      { method: "DELETE" },
+    );
+  },
+  aiPayloadPreview(providerSettingId: string) {
+    return request(apiPaths.aiProviderPayloadPreview(providerSettingId), (value) =>
+      AiPayloadPreviewSchema.parse(value),
+    );
+  },
+  testAiProvider(providerSettingId: string) {
+    return mutate(apiPaths.aiProviderTest(providerSettingId), undefined, (value) =>
+      AiConnectionTestSchema.parse(value),
+    );
+  },
+  aiProviderModels(providerSettingId: string) {
+    return request(apiPaths.aiProviderModels(providerSettingId), (value) =>
+      AiModelListSchema.parse(value),
+    );
+  },
+  startAiClassification(input: AiClassificationJobRequest) {
+    return mutate(apiPaths.aiClassificationJobs, input, (value) => JobSchema.parse(value));
+  },
+  job(jobId: string) {
+    return request(apiPaths.job(jobId), (value) => JobSchema.parse(value));
+  },
+  cancelJob(jobId: string) {
+    return mutate(apiPaths.cancelJob(jobId), undefined, (value) => JobSchema.parse(value));
   },
 };
 

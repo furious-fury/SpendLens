@@ -1,9 +1,11 @@
+import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { fileURLToPath } from "node:url";
-import { JobQueue } from "@spendlens/db";
-import { createApp } from "./app.js";
+import { AiProviderStore, JobQueue, TransactionWorkspace } from "@spendlens/db";
+import { AiClassificationService } from "./ai/ai-classification-service.js";
+import { AI_CLASSIFICATION_JOB_TYPE } from "./ai/ai-routes.js";
 import { createJsonLogger } from "./api/operational-logger.js";
+import { createApp } from "./app.js";
 import { JobWorker } from "./jobs/job-worker.js";
 import { loadSecurityRuntimeConfig } from "./security/runtime-config.js";
 import { SecurityService } from "./security/security-service.js";
@@ -32,9 +34,29 @@ const jobs = new JobQueue(() => {
   }
   return database;
 });
+const sqlite = () => {
+  const database = security.sqlite;
+  if (!database) {
+    throw new Error("The encrypted workspace database is not available.");
+  }
+  return database;
+};
+const transactions = new TransactionWorkspace(sqlite);
+const aiProviders = new AiProviderStore({
+  sqlite,
+  credentialStorage: security.keyProviderKind === "keyring" ? "keyring" : "encrypted_database",
+  encryptionKey: () => security.aiCredentialKey(),
+});
+const aiClassification = new AiClassificationService({
+  sqlite,
+  providers: aiProviders,
+  transactions,
+});
 const worker = new JobWorker({
   queue: jobs,
-  handlers: {},
+  handlers: {
+    [AI_CLASSIFICATION_JOB_TYPE]: aiClassification.jobHandler(),
+  },
   isReady: () => Boolean(security.sqlite),
   onError(error) {
     logger.log({
@@ -50,6 +72,9 @@ const app = createApp({
   security,
   secureCookies: securityConfig.secureCookies,
   jobs,
+  transactions,
+  aiProviders,
+  aiClassification,
   logger,
 });
 
