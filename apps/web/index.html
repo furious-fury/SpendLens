@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Private, local-first financial statement intelligence."
+    />
+    <meta name="theme-color" content="#f6f7f8" />
+    <title>SpendLens</title>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const appearance = localStorage.getItem("spendlens-appearance") || "system";
+        const accent = localStorage.getItem("spendlens-accent") || "indigo";
+        const dark =
+          appearance === "dark" ||
+          (appearance === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        root.classList.toggle("dark", dark);
+        root.dataset.appearance = appearance;
+        root.dataset.accent = accent;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
