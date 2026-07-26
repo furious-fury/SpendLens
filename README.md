@@ -5,7 +5,7 @@ transactions, and explains how money moved without requiring permanent statement
 
 ## Requirements
 
-- Node.js 22
+- Node.js 22.13–24
 - pnpm 10
 - An operating-system credential store for local mode, or a mounted secret file for self-hosting
 
@@ -24,6 +24,19 @@ pnpm security:setup-token
 
 The setup flow creates an encrypted database, asks for a separate SpendLens password, and generates
 a recovery file plus recovery code. Store the recovery file and code separately.
+
+### Windows and WSL
+
+Install and run SpendLens from the same environment. Windows and Windows Subsystem for Linux (WSL)
+create different command launchers and native dependencies, so they cannot share one `node_modules`
+installation.
+
+If you switch between Windows and WSL, rebuild the installation from the terminal you intend to use:
+
+```bash
+pnpm install --force
+pnpm dev
+```
 
 ## Database key modes
 
