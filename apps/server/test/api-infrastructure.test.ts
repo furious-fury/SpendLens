@@ -5,6 +5,8 @@ import {
   AiPayloadPreviewSchema,
   AiProviderListSchema,
   AiProviderSettingSchema,
+  AnalyticsRegistrySchema,
+  AnalyticsResultSchema,
   ApiErrorSchema,
   apiPaths,
   BulkTransactionResultSchema,
@@ -79,6 +81,8 @@ describe("OpenAPI and structured API behavior", () => {
     expect(document.paths).toHaveProperty("/api/ai/providers/{providerSettingId}/test");
     expect(document.paths).toHaveProperty("/api/ai/providers/{providerSettingId}/models");
     expect(document.paths).toHaveProperty("/api/ai/classification-jobs");
+    expect(document.paths).toHaveProperty("/api/analytics/metrics/registry");
+    expect(document.paths).toHaveProperty("/api/analytics/metrics/query");
 
     const invalid = await fixture.app.request("/api/jobs/not-a-uuid", {
       headers: fixture.authHeaders(),
@@ -89,6 +93,50 @@ describe("OpenAPI and structured API behavior", () => {
       family: "validation",
       requestId: expect.any(String),
     });
+    fixture.close();
+  });
+
+  it("serves the authenticated metric registry and a fully scoped analytics query", async () => {
+    const fixture = await initializedFixture();
+    const accountResponse = await fixture.app.request(apiPaths.accounts, {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        institutionName: "PalmPay",
+        institutionCode: "palmpay",
+        displayName: "PalmPay wallet",
+        accountType: "wallet",
+        baseCurrency: "NGN",
+        isOwned: true,
+      }),
+    });
+    const account = AccountSchema.parse(await accountResponse.json());
+    const registryResponse = await fixture.app.request(apiPaths.analyticsRegistry, {
+      headers: fixture.authHeaders(),
+    });
+    const registry = AnalyticsRegistrySchema.parse(await registryResponse.json());
+    const metricsResponse = await fixture.app.request(apiPaths.analyticsMetrics, {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        startDate: "2026-06-01",
+        endDate: "2026-06-30",
+        currency: "NGN",
+        accountIds: [account.id],
+        scopes: ["personal", "business"],
+        metricIds: ["cashflow.net", "balance.closing"],
+        comparison: { mode: "none" },
+      }),
+    });
+    const metrics = AnalyticsResultSchema.parse(await metricsResponse.json());
+
+    expect(registryResponse.status).toBe(200);
+    expect(registry.items).toHaveLength(44);
+    expect(metricsResponse.status).toBe(200);
+    expect(metrics.metrics).toMatchObject([
+      { id: "cashflow.net", status: "available", value: 0, transactionIds: [] },
+      { id: "balance.closing", status: "unavailable", value: null, transactionIds: [] },
+    ]);
     fixture.close();
   });
 

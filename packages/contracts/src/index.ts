@@ -1109,6 +1109,188 @@ export const AiClassificationJobRequestSchema = z.object({
 });
 export type AiClassificationJobRequest = z.infer<typeof AiClassificationJobRequestSchema>;
 
+export const AnalyticsMetricIdSchema = z.enum([
+  "cashflow.total_inflow",
+  "cashflow.total_outflow",
+  "cashflow.net",
+  "cashflow.average_inflow",
+  "cashflow.average_outflow",
+  "cashflow.median_transaction",
+  "cashflow.largest_inflow",
+  "cashflow.largest_outflow",
+  "cashflow.inflow_outflow_ratio",
+  "cashflow.cumulative",
+  "cashflow.transaction_count",
+  "spending.by_category",
+  "spending.by_counterparty",
+  "spending.fees",
+  "spending.cash_withdrawals",
+  "spending.recurring",
+  "spending.by_weekday",
+  "spending.concentration",
+  "spending.unusual",
+  "income.by_source",
+  "income.recurring",
+  "income.by_weekday",
+  "income.concentration",
+  "income.variability",
+  "savings.estimated_rate",
+  "spending.essential",
+  "spending.discretionary",
+  "behaviour.no_spend_days",
+  "behaviour.activity_by_weekday",
+  "behaviour.weekend_share",
+  "behaviour.change",
+  "quality.classification_coverage",
+  "quality.confidence_distribution",
+  "quality.review_queue",
+  "quality.reconciliation",
+  "quality.duplicate_sources",
+  "adjustments.refunds",
+  "adjustments.reversals",
+  "transfers.internal",
+  "transfers.external",
+  "balance.opening",
+  "balance.closing",
+  "balance.lowest",
+  "balance.highest",
+]);
+export type AnalyticsMetricId = z.infer<typeof AnalyticsMetricIdSchema>;
+
+export const AnalyticsDimensionSchema = z.enum([
+  "total",
+  "day",
+  "weekday",
+  "category",
+  "counterparty",
+  "confidence",
+  "review_state",
+  "reconciliation_status",
+  "transaction",
+]);
+export type AnalyticsDimension = z.infer<typeof AnalyticsDimensionSchema>;
+
+export const AnalyticsMetricUnitSchema = z.enum([
+  "minor_units",
+  "count",
+  "basis_points",
+  "ratio",
+  "days",
+]);
+export type AnalyticsMetricUnit = z.infer<typeof AnalyticsMetricUnitSchema>;
+
+export const AnalyticsMetricDefinitionSchema = z.object({
+  id: AnalyticsMetricIdSchema,
+  title: z.string(),
+  definition: z.string(),
+  requiredFields: z.array(z.string()),
+  supportedDimensions: z.array(AnalyticsDimensionSchema),
+  unit: AnalyticsMetricUnitSchema,
+});
+export type AnalyticsMetricDefinition = z.infer<typeof AnalyticsMetricDefinitionSchema>;
+
+const AnalyticsPreviousPeriodSchema = z.object({
+  mode: z.literal("previous_period"),
+});
+const AnalyticsNoComparisonSchema = z.object({
+  mode: z.literal("none"),
+});
+const AnalyticsCustomComparisonSchema = z
+  .object({
+    mode: z.literal("custom"),
+    startDate: z.iso.date(),
+    endDate: z.iso.date(),
+  })
+  .refine(({ startDate, endDate }) => startDate <= endDate, {
+    message: "Comparison startDate must not be after endDate.",
+    path: ["endDate"],
+  });
+
+export const AnalyticsComparisonQuerySchema = z.discriminatedUnion("mode", [
+  AnalyticsPreviousPeriodSchema,
+  AnalyticsNoComparisonSchema,
+  AnalyticsCustomComparisonSchema,
+]);
+export type AnalyticsComparisonQuery = z.infer<typeof AnalyticsComparisonQuerySchema>;
+
+export const AnalyticsQuerySchema = z
+  .object({
+    startDate: z.iso.date(),
+    endDate: z.iso.date(),
+    currency: CurrencyCodeSchema,
+    accountIds: z.array(z.string().uuid()).min(1),
+    scopes: z.array(TransactionScopeSchema).min(1),
+    metricIds: z.array(AnalyticsMetricIdSchema).min(1).optional(),
+    comparison: AnalyticsComparisonQuerySchema.default({ mode: "previous_period" }),
+    excludeInternalTransfers: z.boolean().default(true),
+    useCache: z.boolean().default(true),
+  })
+  .refine(({ startDate, endDate }) => startDate <= endDate, {
+    message: "startDate must not be after endDate.",
+    path: ["endDate"],
+  })
+  .transform((value) => ({
+    ...value,
+    accountIds: [...new Set(value.accountIds)].sort(),
+    scopes: [...new Set(value.scopes)].sort(),
+    metricIds: value.metricIds ? [...new Set(value.metricIds)] : undefined,
+  }));
+export type AnalyticsQuery = z.infer<typeof AnalyticsQuerySchema>;
+
+export const AnalyticsBreakdownItemSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  value: z.number().finite(),
+  transactionIds: z.array(z.string().uuid()),
+});
+export type AnalyticsBreakdownItem = z.infer<typeof AnalyticsBreakdownItemSchema>;
+
+export const AnalyticsMetricComparisonSchema = z.object({
+  startDate: z.iso.date(),
+  endDate: z.iso.date(),
+  value: z.number().finite(),
+  absoluteChange: z.number().finite(),
+  percentageChange: z.number().finite().nullable(),
+  transactionIds: z.array(z.string().uuid()),
+});
+export type AnalyticsMetricComparison = z.infer<typeof AnalyticsMetricComparisonSchema>;
+
+export const AnalyticsMetricResultSchema = z.object({
+  id: AnalyticsMetricIdSchema,
+  title: z.string(),
+  definition: z.string(),
+  unit: AnalyticsMetricUnitSchema,
+  status: z.enum(["available", "unavailable"]),
+  value: z.number().finite().nullable(),
+  unavailableReason: z.string().nullable(),
+  transactionIds: z.array(z.string().uuid()),
+  breakdown: z.array(AnalyticsBreakdownItemSchema),
+  comparison: AnalyticsMetricComparisonSchema.nullable(),
+});
+export type AnalyticsMetricResult = z.infer<typeof AnalyticsMetricResultSchema>;
+
+export const AnalyticsResultSchema = z.object({
+  query: z.object({
+    startDate: z.iso.date(),
+    endDate: z.iso.date(),
+    currency: CurrencyCodeSchema,
+    accountIds: z.array(z.string().uuid()),
+    scopes: z.array(TransactionScopeSchema),
+    excludeInternalTransfers: z.boolean(),
+  }),
+  metrics: z.array(AnalyticsMetricResultSchema),
+  cache: z.object({
+    hit: z.boolean(),
+    calculatedAt: z.string().datetime(),
+  }),
+});
+export type AnalyticsResult = z.infer<typeof AnalyticsResultSchema>;
+
+export const AnalyticsRegistrySchema = z.object({
+  items: z.array(AnalyticsMetricDefinitionSchema),
+});
+export type AnalyticsRegistry = z.infer<typeof AnalyticsRegistrySchema>;
+
 export const apiPaths = {
   live: "/health/live",
   ready: "/health/ready",
@@ -1157,4 +1339,6 @@ export const apiPaths = {
   aiProviderTest: (providerSettingId: string) => `/api/ai/providers/${providerSettingId}/test`,
   aiProviderModels: (providerSettingId: string) => `/api/ai/providers/${providerSettingId}/models`,
   aiClassificationJobs: "/api/ai/classification-jobs",
+  analyticsRegistry: "/api/analytics/metrics/registry",
+  analyticsMetrics: "/api/analytics/metrics/query",
 } as const;

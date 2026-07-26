@@ -31,7 +31,13 @@ export class AppError extends Error {
 }
 
 export const errorFamilies = {
-  validation: ["INVALID_REQUEST", "VALIDATION_FAILED"],
+  validation: [
+    "INVALID_REQUEST",
+    "VALIDATION_FAILED",
+    "ANALYTICS_ACCOUNT_NOT_FOUND",
+    "ANALYTICS_ACCOUNT_CURRENCY_MISMATCH",
+    "ANALYTICS_QUERY_INVALID",
+  ],
   setup: ["SETUP_REQUIRED", "SETUP_NOT_STARTED", "SETUP_ALREADY_COMPLETE"],
   authentication: [
     "AUTHENTICATION_REQUIRED",

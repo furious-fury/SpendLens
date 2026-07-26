@@ -1,5 +1,7 @@
 export * from "./ai-provider-migration.js";
 export * from "./ai-provider-store.js";
+export * from "./analytics-engine.js";
+export * from "./analytics-migration.js";
 export * from "./audit-log.js";
 export * from "./classification-engine.js";
 export * from "./classification-migration.js";

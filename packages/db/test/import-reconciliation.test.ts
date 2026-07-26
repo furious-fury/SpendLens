@@ -173,6 +173,15 @@ describe("overlapping import reconciliation", () => {
         )
         .get(),
     ).toEqual({ decision: "skipped" });
+    expect(
+      fixture.sqlite
+        .prepare(
+          `SELECT count(*) AS count
+             FROM metric_invalidations
+            WHERE reason = 'import.committed'`,
+        )
+        .get(),
+    ).toEqual({ count: 2 });
     fixture.sqlite.close();
   });
 
