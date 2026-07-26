@@ -4,6 +4,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
+import { SecurityGate } from "@/components/security-gate";
 import { ThemeProvider } from "@/components/theme-provider";
 import { router } from "@/router";
 
@@ -27,7 +28,9 @@ createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <RouterProvider router={router} />
+        <SecurityGate>
+          <RouterProvider router={router} />
+        </SecurityGate>
       </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,

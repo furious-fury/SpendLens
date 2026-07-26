@@ -4,8 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean",
+    "build": "tsup src/index.ts src/security/security-cli.ts --format esm --dts --clean",
     "dev": "node --watch --import tsx src/index.ts",
+    "predev": "pnpm --filter @spendlens/db build",
+    "pretest": "pnpm --filter @spendlens/db build",
+    "security:generate-secret": "node --import tsx src/security/security-cli.ts generate-secret",
+    "security:recover": "node --import tsx src/security/security-cli.ts recover",
+    "security:setup-token": "node --import tsx src/security/security-cli.ts setup-token",
     "start": "node dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -13,12 +18,15 @@
   "dependencies": {
     "@hono/node-server": "^1.0.0",
     "@spendlens/contracts": "workspace:*",
+    "@spendlens/db": "workspace:*",
+    "argon2": "^0.44.0",
+    "drizzle-orm": "^0.44.7",
     "hono": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "tsx": "^4.0.0",
     "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
     "vitest": "^3.0.0"
   }
 }

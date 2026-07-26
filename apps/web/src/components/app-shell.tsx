@@ -17,6 +17,7 @@ import {
   MagnifyingGlass,
   Receipt,
   SealCheck,
+  SignOut,
   SlidersHorizontal,
   X,
   type Icon,
@@ -24,6 +25,7 @@ import {
 import { useState } from "react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { ThemeMenu } from "@/components/theme-menu";
+import { useSecurity } from "@/components/security-gate";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -181,11 +183,13 @@ function Sidebar({
   mobileOpen,
   onCollapse,
   onMobileClose,
+  onSignOut,
 }: {
   collapsed: boolean;
   mobileOpen: boolean;
   onCollapse: () => void;
   onMobileClose: () => void;
+  onSignOut: () => void;
 }) {
   return (
     <>
@@ -282,6 +286,18 @@ function Sidebar({
               </span>
             )}
           </div>
+          <button
+            type="button"
+            className={cn(
+              "mt-1 flex h-9 w-full items-center gap-3 rounded-lg px-3 text-xs text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
+              collapsed && "justify-center px-0",
+            )}
+            onClick={onSignOut}
+            aria-label="Sign out"
+          >
+            <SignOut className="size-4" />
+            {!collapsed && <span>Sign out</span>}
+          </button>
         </div>
       </aside>
     </>
@@ -325,6 +341,7 @@ function MobileBottomNavigation() {
 }
 
 export function AppShell() {
+  const security = useSecurity();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("sidebar") === "collapsed");
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -346,6 +363,7 @@ export function AppShell() {
           mobileOpen={mobileOpen}
           onCollapse={toggleCollapsed}
           onMobileClose={() => setMobileOpen(false)}
+          onSignOut={() => void security.signOut()}
         />
         <div
           className={cn(
