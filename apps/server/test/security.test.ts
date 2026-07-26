@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { apiPaths, RecoveryFileSchema } from "@spendlens/contracts";
-import { MemoryKeyProvider, openEncryptedDatabase } from "@spendlens/db";
+import { AiProviderStore, MemoryKeyProvider, openEncryptedDatabase } from "@spendlens/db";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { createRecoveryKit, unwrapDatabaseKey } from "../src/security/crypto.js";
@@ -207,6 +207,57 @@ describe("security setup and authentication", () => {
       body: { password: "a different secure passphrase" },
     });
     expect(newLogin.status).toBe(200);
+    fixture.security.close();
+  });
+
+  it("re-encrypts self-hosted provider credentials during database key rotation", async () => {
+    const fixture = await initializedFixture();
+    const login = await rawJsonRequest(fixture.app, apiPaths.login, {
+      method: "POST",
+      body: { password: "correct horse battery staple" },
+    });
+    const cookies = cookieJar(login.response);
+    const sqlite = fixture.security.sqlite;
+    if (!sqlite) throw new Error("Expected an initialized database.");
+    const workspace = sqlite.prepare("SELECT id FROM workspaces LIMIT 1").get() as {
+      id: string;
+    };
+    const providers = new AiProviderStore({
+      sqlite,
+      credentialStorage: "encrypted_database",
+      encryptionKey: () => fixture.security.aiCredentialKey(),
+    });
+    const provider = await providers.create(workspace.id, {
+      name: "Remote",
+      provider: "openai_compatible",
+      endpoint: "https://provider.example/v1",
+      model: "model",
+      timeoutMs: 30_000,
+      enabled: true,
+      localModel: false,
+      payloadPolicy: "remote_redacted",
+      apiKey: "rotation-secret",
+      acknowledgeRemotePayload: true,
+    });
+    fixture.security.registerDatabaseRekeyHook((previousKey, nextKey) =>
+      providers.rotateEncryptionKey(previousKey, nextKey),
+    );
+    const before = sqlite
+      .prepare("SELECT credential_ciphertext AS ciphertext FROM ai_provider_settings WHERE id = ?")
+      .get(provider.id) as { ciphertext: string };
+
+    const response = await requestJson(fixture.app, apiPaths.rekey, {
+      method: "POST",
+      body: { password: "correct horse battery staple" },
+      cookie: cookieHeader(cookies),
+      csrf: requiredCookie(cookies, CSRF_COOKIE),
+    });
+    expect(response.status).toBe(200);
+    const after = sqlite
+      .prepare("SELECT credential_ciphertext AS ciphertext FROM ai_provider_settings WHERE id = ?")
+      .get(provider.id) as { ciphertext: string };
+    expect(after.ciphertext).not.toBe(before.ciphertext);
+    await expect(providers.credential(workspace.id, provider.id)).resolves.toBe("rotation-secret");
     fixture.security.close();
   });
 });

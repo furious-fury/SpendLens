@@ -962,6 +962,109 @@ export const auditEvents = sqliteTable(
   ],
 );
 
+export const aiProviderSettings = sqliteTable(
+  "ai_provider_settings",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    provider: text("provider", {
+      enum: ["openai_compatible", "anthropic", "gemini", "ollama"],
+    }).notNull(),
+    endpoint: text("endpoint").notNull(),
+    model: text("model").notNull(),
+    timeoutMs: integer("timeout_ms").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    localModel: integer("local_model", { mode: "boolean" }).notNull().default(false),
+    payloadPolicy: text("payload_policy", {
+      enum: ["remote_redacted", "local_full"],
+    }).notNull(),
+    credentialStorage: text("credential_storage", {
+      enum: ["keyring", "encrypted_database"],
+    }).notNull(),
+    credentialCiphertext: text("credential_ciphertext"),
+    credentialNonce: text("credential_nonce"),
+    credentialAuthTag: text("credential_auth_tag"),
+    hasCredential: integer("has_credential", { mode: "boolean" }).notNull().default(false),
+    remotePayloadAcknowledgedAt: integer("remote_payload_acknowledged_at", {
+      mode: "timestamp_ms",
+    }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_provider_settings_workspace_provider_unique").on(
+      table.workspaceId,
+      table.provider,
+    ),
+    index("ai_provider_settings_enabled_idx").on(table.workspaceId, table.enabled),
+  ],
+);
+
+export const aiClassificationRuns = sqliteTable(
+  "ai_classification_runs",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    providerSettingId: text("provider_setting_id").references(() => aiProviderSettings.id, {
+      onDelete: "set null",
+    }),
+    jobId: text("job_id").references(() => jobs.id, { onDelete: "set null" }),
+    promptVersion: text("prompt_version").notNull(),
+    provider: text("provider", {
+      enum: ["openai_compatible", "anthropic", "gemini", "ollama"],
+    }).notNull(),
+    model: text("model").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    status: text("status", {
+      enum: ["running", "succeeded", "failed", "cancelled"],
+    }).notNull(),
+    result: text("result"),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("ai_classification_runs_workspace_idx").on(table.workspaceId, table.createdAt),
+    index("ai_classification_runs_job_idx").on(table.jobId),
+  ],
+);
+
+export const aiClassificationSuggestions = sqliteTable(
+  "ai_classification_suggestions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    runId: text("run_id")
+      .notNull()
+      .references(() => aiClassificationRuns.id, { onDelete: "cascade" }),
+    suggestion: text("suggestion").notNull(),
+    confidence: text("confidence", { enum: ["low", "medium", "high"] }).notNull(),
+    reasonCodes: text("reason_codes").notNull(),
+    explanation: text("explanation").notNull(),
+    evidence: text("evidence").notNull(),
+    inputUpdatedAt: integer("input_updated_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("ai_classification_suggestions_transaction_idx").on(
+      table.workspaceId,
+      table.transactionId,
+      table.createdAt,
+    ),
+    index("ai_classification_suggestions_run_idx").on(table.runId),
+  ],
+);
+
 export const financialSchema = {
   accounts,
   ownedAccountIdentifiers,
@@ -981,6 +1084,9 @@ export const financialSchema = {
   classificationRules,
   classificationDecisions,
   classificationReviewActions,
+  aiProviderSettings,
+  aiClassificationRuns,
+  aiClassificationSuggestions,
   importReconciliations,
   importMatchDecisions,
 };

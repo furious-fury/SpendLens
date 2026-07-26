@@ -1,5 +1,5 @@
 const SENSITIVE_KEY =
-  /(^key$|^iv$|account.?number|auth.?tag|authorization|ciphertext|cookie|credential|crypto|database.?key|encryption.?key|narration|password|private.?key|raw.?fields|recovery.?code|secret|statement.?content|token)/i;
+  /(^key$|^iv$|account.?number|api.?key|auth.?tag|authorization|ciphertext|cookie|credential|crypto|database.?key|encryption.?key|narration|password|private.?key|raw.?fields|recovery.?code|secret|statement.?content|token)/i;
 
 const REDACTED = "[REDACTED]";
 const MAX_DEPTH = 8;

@@ -455,7 +455,16 @@ const TransactionCounterpartySummarySchema = z.object({
 export const ClassificationEvidenceSchema = z.object({
   code: z.string(),
   label: z.string(),
-  source: z.enum(["manual", "transfer", "rule", "counterparty", "bank", "history", "fallback"]),
+  source: z.enum([
+    "manual",
+    "transfer",
+    "rule",
+    "counterparty",
+    "bank",
+    "history",
+    "ai",
+    "fallback",
+  ]),
   ruleId: z.string().uuid().nullable().optional(),
 });
 export type ClassificationEvidence = z.infer<typeof ClassificationEvidenceSchema>;
@@ -850,7 +859,16 @@ export type ClassificationSuggestion = z.infer<typeof ClassificationSuggestionSc
 
 export const ClassificationEvaluationSchema = z.object({
   transactionId: z.string().uuid(),
-  source: z.enum(["manual", "transfer", "rule", "counterparty", "bank", "history", "unclassified"]),
+  source: z.enum([
+    "manual",
+    "transfer",
+    "rule",
+    "counterparty",
+    "bank",
+    "history",
+    "ai",
+    "unclassified",
+  ]),
   confidence: TransactionConfidenceSchema,
   suggestion: ClassificationSuggestionSchema.nullable(),
   winnerRuleId: z.string().uuid().nullable(),
@@ -967,6 +985,130 @@ export const UndoReviewDecisionResultSchema = z.object({
 });
 export type UndoReviewDecisionResult = z.infer<typeof UndoReviewDecisionResultSchema>;
 
+export const AiProviderKindSchema = z.enum(["openai_compatible", "anthropic", "gemini", "ollama"]);
+export type AiProviderKind = z.infer<typeof AiProviderKindSchema>;
+
+export const AiPayloadPolicySchema = z.enum(["remote_redacted", "local_full"]);
+export type AiPayloadPolicy = z.infer<typeof AiPayloadPolicySchema>;
+
+const AiProviderFieldsSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  provider: AiProviderKindSchema,
+  endpoint: z.string().url().max(500),
+  model: z.string().trim().min(1).max(200),
+  timeoutMs: z.number().int().min(1_000).max(120_000),
+  enabled: z.boolean(),
+  localModel: z.boolean(),
+  payloadPolicy: AiPayloadPolicySchema,
+  apiKey: z.string().trim().min(1).max(2_000).optional(),
+  acknowledgeRemotePayload: z.boolean(),
+});
+
+export const AiProviderInputSchema = AiProviderFieldsSchema.extend({
+  timeoutMs: AiProviderFieldsSchema.shape.timeoutMs.default(30_000),
+  enabled: AiProviderFieldsSchema.shape.enabled.default(false),
+  localModel: AiProviderFieldsSchema.shape.localModel.default(false),
+  acknowledgeRemotePayload: AiProviderFieldsSchema.shape.acknowledgeRemotePayload.default(false),
+}).superRefine((value, context) => {
+  if (value.localModel && value.payloadPolicy !== "local_full") {
+    context.addIssue({
+      code: "custom",
+      path: ["payloadPolicy"],
+      message: "Explicitly local models must use the local full-context policy.",
+    });
+  }
+  if (!value.localModel && value.payloadPolicy !== "remote_redacted") {
+    context.addIssue({
+      code: "custom",
+      path: ["payloadPolicy"],
+      message: "Remote providers must use the redacted payload policy.",
+    });
+  }
+  if (!value.localModel && !value.endpoint.toLowerCase().startsWith("https://")) {
+    context.addIssue({
+      code: "custom",
+      path: ["endpoint"],
+      message: "Remote provider endpoints must use HTTPS.",
+    });
+  }
+  if (value.enabled && !value.localModel && !value.acknowledgeRemotePayload) {
+    context.addIssue({
+      code: "custom",
+      path: ["acknowledgeRemotePayload"],
+      message: "Review and acknowledge the remote payload policy before enabling this provider.",
+    });
+  }
+});
+export type AiProviderInput = z.infer<typeof AiProviderInputSchema>;
+
+export const AiProviderUpdateSchema = AiProviderFieldsSchema.partial().extend({
+  clearApiKey: z.boolean().optional(),
+});
+export type AiProviderUpdate = z.infer<typeof AiProviderUpdateSchema>;
+
+export const AiProviderSettingSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  provider: AiProviderKindSchema,
+  endpoint: z.string().url(),
+  model: z.string(),
+  timeoutMs: z.number().int(),
+  enabled: z.boolean(),
+  localModel: z.boolean(),
+  payloadPolicy: AiPayloadPolicySchema,
+  hasCredential: z.boolean(),
+  credentialStorage: z.enum(["keyring", "encrypted_database"]),
+  remotePayloadAcknowledgedAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type AiProviderSetting = z.infer<typeof AiProviderSettingSchema>;
+
+export const AiProviderListSchema = z.object({
+  items: z.array(AiProviderSettingSchema),
+  providersDisabled: z.boolean(),
+});
+
+export const AiPayloadPreviewSchema = z.object({
+  policy: AiPayloadPolicySchema,
+  localModel: z.boolean(),
+  omittedFields: z.array(z.string()),
+  sample: z.record(z.string(), z.unknown()),
+});
+export type AiPayloadPreview = z.infer<typeof AiPayloadPreviewSchema>;
+
+export const AiConnectionTestSchema = z.object({
+  ok: z.boolean(),
+  latencyMs: z.number().int().nonnegative(),
+  models: z.array(z.string()),
+  message: z.string(),
+});
+export type AiConnectionTest = z.infer<typeof AiConnectionTestSchema>;
+
+export const AiModelListSchema = z.object({
+  items: z.array(z.string()),
+  listingSupported: z.boolean(),
+});
+
+export const AiClassificationOutputSchema = z.object({
+  category: z.string().trim().min(1).max(120),
+  subcategory: z.string().trim().min(1).max(120).nullable(),
+  counterparty: z.string().trim().min(1).max(200).nullable(),
+  transactionType: TransactionTypeSchema,
+  scope: TransactionScopeSchema.optional(),
+  confidence: z.enum(["low", "medium", "high"]),
+  reasonCodes: z.array(z.string().trim().min(1).max(80)).min(1).max(8),
+  explanation: z.string().trim().min(1).max(500),
+  evidence: z.array(z.string().trim().min(1).max(200)).min(1).max(8),
+});
+export type AiClassificationOutput = z.infer<typeof AiClassificationOutputSchema>;
+
+export const AiClassificationJobRequestSchema = z.object({
+  providerSettingId: z.string().uuid(),
+  transactionIds: z.array(z.string().uuid()).min(1).max(500),
+});
+export type AiClassificationJobRequest = z.infer<typeof AiClassificationJobRequestSchema>;
+
 export const apiPaths = {
   live: "/health/live",
   ready: "/health/ready",
@@ -1008,4 +1150,11 @@ export const apiPaths = {
   reviewGroups: "/api/classification/review",
   reviewDecisions: "/api/classification/review/decisions",
   undoReviewDecision: (actionId: string) => `/api/classification/review/decisions/${actionId}/undo`,
+  aiProviders: "/api/ai/providers",
+  aiProvider: (providerSettingId: string) => `/api/ai/providers/${providerSettingId}`,
+  aiProviderPayloadPreview: (providerSettingId: string) =>
+    `/api/ai/providers/${providerSettingId}/payload-preview`,
+  aiProviderTest: (providerSettingId: string) => `/api/ai/providers/${providerSettingId}/test`,
+  aiProviderModels: (providerSettingId: string) => `/api/ai/providers/${providerSettingId}/models`,
+  aiClassificationJobs: "/api/ai/classification-jobs",
 } as const;
