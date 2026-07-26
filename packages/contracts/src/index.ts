@@ -262,6 +262,41 @@ export const ImportProgressSchema = z.object({
 
 export type ImportProgress = z.infer<typeof ImportProgressSchema>;
 
+export const ImportReconciliationSchema = z.object({
+  status: z.enum(["matched", "mismatched"]),
+  declaredInflowMinor: z.number().int().nonnegative(),
+  declaredOutflowMinor: z.number().int().nonnegative(),
+  parsedInflowMinor: z.number().int().nonnegative(),
+  parsedOutflowMinor: z.number().int().nonnegative(),
+  currency: CurrencyCodeSchema,
+});
+
+export const ImportPreviewSchema = z.object({
+  id: z.string().uuid(),
+  status: z.literal("previewed"),
+  institution: z.string(),
+  maskedAccountNumber: z.string().nullable(),
+  statementPeriod: z.object({
+    start: z.iso.date(),
+    end: z.iso.date(),
+  }),
+  totals: z.object({
+    inflowMinor: z.number().int().nonnegative(),
+    outflowMinor: z.number().int().nonnegative(),
+    currency: CurrencyCodeSchema,
+  }),
+  transactionCount: z.number().int().nonnegative(),
+  reconciliation: ImportReconciliationSchema,
+  parser: z.object({
+    key: z.string(),
+    version: z.string(),
+  }),
+  requiresConfirmation: z.boolean(),
+  createdAt: z.string().datetime(),
+});
+
+export type ImportPreview = z.infer<typeof ImportPreviewSchema>;
+
 export const apiPaths = {
   live: "/health/live",
   ready: "/health/ready",
@@ -276,5 +311,7 @@ export const apiPaths = {
   openApi: "/api/openapi.json",
   job: (jobId: string) => `/api/jobs/${jobId}`,
   cancelJob: (jobId: string) => `/api/jobs/${jobId}/cancel`,
+  importPreviews: "/api/imports/previews",
+  importPreview: (importId: string) => `/api/imports/previews/${importId}`,
   importProgress: (importId: string) => `/api/imports/${importId}/progress`,
 } as const;
