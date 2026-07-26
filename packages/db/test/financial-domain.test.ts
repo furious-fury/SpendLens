@@ -58,6 +58,7 @@ describe("financial domain migration", () => {
       { id: "0001_financial_domain" },
       { id: "0002_api_jobs_audit" },
       { id: "0003_import_previews" },
+      { id: "0004_import_reconciliation" },
     ]);
     sqlite.close();
   });

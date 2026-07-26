@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import type { ImportPreviewStore, StoredImportPreview } from "@spendlens/db";
+import {
+  fallbackTransactionFingerprint,
+  type ImportPreviewStore,
+  type StoredImportPreview,
+} from "@spendlens/db";
 import { PalmPayStatementParser } from "./palmpay-parser.js";
 import { readPositionedPdf } from "./pdf-document.js";
 import { selectParser } from "./parser-types.js";
@@ -61,6 +65,7 @@ export class ImportPreviewService {
             amountMinor: transaction.amountMinor,
             currency: transaction.currency,
             narration: transaction.narration,
+            fallbackFingerprint: fallbackTransactionFingerprint(transaction),
             rowFingerprint: rowFingerprint(transaction),
             rawFields: {
               sourcePage: transaction.pageNumber,

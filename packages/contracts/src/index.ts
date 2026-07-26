@@ -297,6 +297,82 @@ export const ImportPreviewSchema = z.object({
 
 export type ImportPreview = z.infer<typeof ImportPreviewSchema>;
 
+export const ImportMatchClassificationSchema = z.enum([
+  "new",
+  "duplicate",
+  "possible_duplicate",
+  "conflict",
+]);
+
+export const ImportMatchDecisionSchema = z.enum(["pending", "confirmed", "rejected", "skipped"]);
+
+export const ImportTransactionSnapshotSchema = z.object({
+  transactionId: z.string().uuid().nullable(),
+  sourceTransactionId: z.string().nullable(),
+  occurredAt: z.string().datetime(),
+  direction: z.enum(["debit", "credit"]),
+  amountMinor: z.number().int().positive(),
+  currency: CurrencyCodeSchema,
+  narration: z.string(),
+});
+
+export const ImportAttentionItemSchema = z.object({
+  decisionId: z.string().uuid(),
+  classification: z.enum(["possible_duplicate", "conflict"]),
+  decision: ImportMatchDecisionSchema,
+  reasonCode: z.string(),
+  source: ImportTransactionSnapshotSchema,
+  candidate: ImportTransactionSnapshotSchema,
+});
+
+export const ImportDeduplicationCountsSchema = z.object({
+  new: z.number().int().nonnegative(),
+  duplicate: z.number().int().nonnegative(),
+  possibleDuplicate: z.number().int().nonnegative(),
+  conflict: z.number().int().nonnegative(),
+  skipped: z.number().int().nonnegative(),
+});
+
+export const ImportDeduplicationSummarySchema = z.object({
+  importId: z.string().uuid(),
+  status: z.enum(["analyzed", "committed"]),
+  accountId: z.string().uuid().nullable(),
+  willCreateAccount: z.boolean(),
+  counts: ImportDeduplicationCountsSchema,
+  pendingDecisionCount: z.number().int().nonnegative(),
+  attentionItems: z.array(ImportAttentionItemSchema),
+  commitResult: z
+    .object({
+      canonicalTransactionsCreated: z.number().int().nonnegative(),
+      duplicateSourcesLinked: z.number().int().nonnegative(),
+      skippedSources: z.number().int().nonnegative(),
+      committedAt: z.string().datetime(),
+    })
+    .nullable(),
+});
+
+export type ImportDeduplicationSummary = z.infer<typeof ImportDeduplicationSummarySchema>;
+
+export const AnalyzeImportRequestSchema = z.object({
+  accountId: z.string().uuid().optional(),
+});
+
+export const ImportDecisionRequestSchema = z.object({
+  decisions: z
+    .array(
+      z.object({
+        decisionId: z.string().uuid(),
+        action: z.enum(["confirm_duplicate", "keep_separate", "skip"]),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+
+export const CommitImportRequestSchema = z.object({
+  confirmUnreconciled: z.boolean().default(false),
+});
+
 export const apiPaths = {
   live: "/health/live",
   ready: "/health/ready",
@@ -313,5 +389,9 @@ export const apiPaths = {
   cancelJob: (jobId: string) => `/api/jobs/${jobId}/cancel`,
   importPreviews: "/api/imports/previews",
   importPreview: (importId: string) => `/api/imports/previews/${importId}`,
+  analyzeImport: (importId: string) => `/api/imports/previews/${importId}/reconcile`,
+  importDecisions: (importId: string) => `/api/imports/previews/${importId}/decisions`,
+  commitImport: (importId: string) => `/api/imports/previews/${importId}/commit`,
+  deleteImport: (importId: string) => `/api/imports/${importId}`,
   importProgress: (importId: string) => `/api/imports/${importId}/progress`,
 } as const;

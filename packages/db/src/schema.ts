@@ -230,6 +230,7 @@ export const parsedSourceRows = sqliteTable(
     senderOrRecipientName: text("sender_or_recipient_name"),
     institutionName: text("institution_name"),
     maskedAccountNumber: text("masked_account_number"),
+    fallbackFingerprint: text("fallback_fingerprint"),
     rowFingerprint: text("row_fingerprint").notNull(),
     rawFields: text("raw_fields").notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
@@ -243,6 +244,7 @@ export const parsedSourceRows = sqliteTable(
     index("parsed_source_rows_batch_idx").on(table.importBatchId),
     index("parsed_source_rows_occurred_at_idx").on(table.occurredAtUtc),
     index("parsed_source_rows_reference_idx").on(table.sourceReference),
+    index("parsed_source_rows_fallback_idx").on(table.fallbackFingerprint),
     check("parsed_source_rows_index_check", sql`${table.sourceRowIndex} >= 0`),
     check(
       "parsed_source_rows_amount_check",
@@ -253,6 +255,12 @@ export const parsedSourceRows = sqliteTable(
       "parsed_source_rows_fingerprint_check",
       sql`length(${table.rowFingerprint}) = 64
           AND ${table.rowFingerprint} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+    check(
+      "parsed_source_rows_fallback_check",
+      sql`${table.fallbackFingerprint} IS NULL
+          OR (length(${table.fallbackFingerprint}) = 64
+            AND ${table.fallbackFingerprint} NOT GLOB '*[^0-9a-f]*')`,
     ),
     check("parsed_source_rows_raw_fields_check", sql`json_valid(${table.rawFields})`),
   ],
@@ -366,6 +374,7 @@ export const transactions = sqliteTable(
     currency: text("currency").notNull(),
     normalizedNarration: text("normalized_narration"),
     sourceReference: text("source_reference"),
+    fallbackFingerprint: text("fallback_fingerprint"),
     counterpartyId: text("counterparty_id").references(() => counterparties.id, {
       onDelete: "set null",
     }),
@@ -415,6 +424,8 @@ export const transactions = sqliteTable(
     index("transactions_counterparty_idx").on(table.counterpartyId),
     index("transactions_review_state_idx").on(table.workspaceId, table.reviewState),
     index("transactions_pair_idx").on(table.pairedTransactionId),
+    index("transactions_account_reference_idx").on(table.accountId, table.sourceReference),
+    index("transactions_account_fallback_idx").on(table.accountId, table.fallbackFingerprint),
     check(
       "transactions_amount_check",
       sql`typeof(${table.amountMinor}) = 'integer'
@@ -422,6 +433,12 @@ export const transactions = sqliteTable(
           AND ${table.amountMinor} <= 9007199254740991`,
     ),
     check("transactions_currency_check", currencyCheck(table.currency)),
+    check(
+      "transactions_fallback_check",
+      sql`${table.fallbackFingerprint} IS NULL
+          OR (length(${table.fallbackFingerprint}) = 64
+            AND ${table.fallbackFingerprint} NOT GLOB '*[^0-9a-f]*')`,
+    ),
     check(
       "transactions_confidence_check",
       sql`${table.confidenceBasisPoints} IS NULL
@@ -603,6 +620,98 @@ export const transactionRevisions = sqliteTable(
   ],
 );
 
+export const importReconciliations = sqliteTable(
+  "import_reconciliations",
+  {
+    importBatchId: text("import_batch_id")
+      .primaryKey()
+      .references(() => importBatches.id, { onDelete: "cascade" }),
+    accountId: text("account_id").references(() => accounts.id, { onDelete: "restrict" }),
+    createAccount: integer("create_account", { mode: "boolean" }).notNull().default(false),
+    newCount: integer("new_count").notNull(),
+    duplicateCount: integer("duplicate_count").notNull(),
+    possibleDuplicateCount: integer("possible_duplicate_count").notNull(),
+    conflictCount: integer("conflict_count").notNull(),
+    skippedCount: integer("skipped_count").notNull().default(0),
+    canonicalCreatedCount: integer("canonical_created_count"),
+    duplicateLinkedCount: integer("duplicate_linked_count"),
+    analyzedAt: integer("analyzed_at", { mode: "timestamp_ms" }).notNull(),
+    committedAt: integer("committed_at", { mode: "timestamp_ms" }),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("import_reconciliations_account_idx").on(table.accountId),
+    check(
+      "import_reconciliations_counts_check",
+      sql`${table.newCount} >= 0
+          AND ${table.duplicateCount} >= 0
+          AND ${table.possibleDuplicateCount} >= 0
+          AND ${table.conflictCount} >= 0
+          AND ${table.skippedCount} >= 0
+          AND (${table.canonicalCreatedCount} IS NULL OR ${table.canonicalCreatedCount} >= 0)
+          AND (${table.duplicateLinkedCount} IS NULL OR ${table.duplicateLinkedCount} >= 0)`,
+    ),
+  ],
+);
+
+export const importMatchDecisions = sqliteTable(
+  "import_match_decisions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    importBatchId: text("import_batch_id")
+      .notNull()
+      .references(() => importBatches.id, { onDelete: "cascade" }),
+    parsedSourceRowId: text("parsed_source_row_id").notNull(),
+    candidateTransactionId: text("candidate_transaction_id").references(() => transactions.id, {
+      onDelete: "set null",
+    }),
+    classification: text("classification", {
+      enum: ["new", "duplicate", "possible_duplicate", "conflict"],
+    }).notNull(),
+    decision: text("decision", {
+      enum: ["pending", "confirmed", "rejected", "skipped"],
+    }).notNull(),
+    matchBasis: text("match_basis", {
+      enum: ["none", "strong_id", "fallback"],
+    }).notNull(),
+    reasonCode: text("reason_code").notNull(),
+    decidedByUserId: text("decided_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    decidedAt: integer("decided_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("import_match_decisions_source_unique").on(table.parsedSourceRowId),
+    index("import_match_decisions_import_idx").on(table.importBatchId),
+    index("import_match_decisions_candidate_idx").on(table.candidateTransactionId),
+    index("import_match_decisions_pending_idx")
+      .on(table.workspaceId, table.decision)
+      .where(sql`${table.decision} = 'pending'`),
+    foreignKey({
+      columns: [table.parsedSourceRowId, table.importBatchId],
+      foreignColumns: [parsedSourceRows.id, parsedSourceRows.importBatchId],
+      name: "import_match_decisions_source_batch_fk",
+    }).onDelete("cascade"),
+    check(
+      "import_match_decisions_candidate_check",
+      sql`(${table.classification} = 'new' AND ${table.candidateTransactionId} IS NULL)
+          OR (${table.classification} <> 'new'
+            AND (${table.candidateTransactionId} IS NOT NULL
+              OR ${table.decision} IN ('rejected','skipped')))`,
+    ),
+    check(
+      "import_match_decisions_automatic_check",
+      sql`${table.classification} IN ('possible_duplicate','conflict')
+          OR ${table.decision} = 'confirmed'`,
+    ),
+  ],
+);
+
 export const jobs = sqliteTable(
   "jobs",
   {
@@ -715,6 +824,8 @@ export const financialSchema = {
   tags,
   transactionTags,
   transactionRevisions,
+  importReconciliations,
+  importMatchDecisions,
 };
 
 export const infrastructureSchema = {

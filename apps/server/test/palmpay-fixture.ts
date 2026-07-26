@@ -5,6 +5,7 @@ interface FixtureOptions {
   declaredOutflow?: string;
   includeText?: boolean;
   pageCount?: number;
+  marker?: string;
 }
 
 export async function createSanitizedPalmPayPdf(options: FixtureOptions = {}): Promise<Uint8Array> {
@@ -18,6 +19,7 @@ export async function createSanitizedPalmPayPdf(options: FixtureOptions = {}): P
       page.drawText(text, { x, y, size, font });
 
     draw("PalmPay support@palmpay.com", 26, 740, 12);
+    if (options.marker) draw(options.marker, 26, 720, 6);
     draw("Account Statement", 26, 694, 16);
     draw("Account Number", 359, 677);
     draw("000 000 4321", 500, 677);
