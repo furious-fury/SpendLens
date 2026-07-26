@@ -1,12 +1,17 @@
-export class SecurityError extends Error {
+import { AppError, familyForCode } from "../api/app-error.js";
+
+export class SecurityError extends AppError {
   constructor(
-    readonly code: string,
+    code: string,
     message: string,
-    readonly status: 400 | 401 | 403 | 404 | 409 | 429 | 500 | 503,
-    readonly retryAfterSeconds?: number,
-    readonly fields?: Record<string, string[]>,
+    status: 400 | 401 | 403 | 404 | 409 | 429 | 500 | 503,
+    retryAfterSeconds?: number,
+    fields?: Record<string, string[]>,
   ) {
-    super(message);
+    super(familyForCode(code), code, message, status, {
+      ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
+      ...(fields ? { fields } : {}),
+    });
     this.name = "SecurityError";
   }
 }

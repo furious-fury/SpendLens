@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.0.0",
+    "@hono/zod-openapi": "^1.5.1",
     "@spendlens/contracts": "workspace:*",
     "@spendlens/db": "workspace:*",
     "argon2": "^0.44.0",

@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { apiInfrastructureMigrationSql } from "./api-infrastructure-migration.js";
 import { financialDomainMigrationSql } from "./financial-domain-migration.js";
 import { seedStarterTaxonomy } from "./taxonomy.js";
 
@@ -78,6 +79,10 @@ const migrations: Migration[] = [
         seedStarterTaxonomy(sqlite, workspace.id);
       }
     },
+  },
+  {
+    id: "0002_api_jobs_audit",
+    sql: apiInfrastructureMigrationSql,
   },
 ];
 

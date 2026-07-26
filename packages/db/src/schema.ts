@@ -593,6 +593,103 @@ export const transactionRevisions = sqliteTable(
   ],
 );
 
+export const jobs = sqliteTable(
+  "jobs",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    jobType: text("job_type").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status", {
+      enum: ["queued", "running", "succeeded", "failed", "cancelled"],
+    })
+      .notNull()
+      .default("queued"),
+    payload: text("payload").notNull(),
+    result: text("result"),
+    progressBasisPoints: integer("progress_basis_points").notNull().default(0),
+    progressMessage: text("progress_message"),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    availableAt: integer("available_at", { mode: "timestamp_ms" }).notNull(),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+    cancelledAt: integer("cancelled_at", { mode: "timestamp_ms" }),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    relatedImportBatchId: text("related_import_batch_id").references(() => importBatches.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("jobs_idempotency_unique").on(
+      table.workspaceId,
+      table.jobType,
+      table.idempotencyKey,
+    ),
+    index("jobs_claim_idx").on(table.status, table.availableAt, table.createdAt),
+    index("jobs_workspace_idx").on(table.workspaceId, table.createdAt),
+    index("jobs_import_idx").on(table.relatedImportBatchId),
+    index("jobs_lease_idx").on(table.status, table.leaseExpiresAt),
+    check("jobs_progress_check", sql`${table.progressBasisPoints} BETWEEN 0 AND 10000`),
+    check("jobs_attempts_check", sql`${table.attempts} >= 0 AND ${table.maxAttempts} > 0`),
+    check("jobs_payload_check", sql`json_valid(${table.payload})`),
+    check("jobs_result_check", sql`${table.result} IS NULL OR json_valid(${table.result})`),
+    check(
+      "jobs_lease_check",
+      sql`(${table.status} = 'running'
+            AND ${table.leaseOwner} IS NOT NULL
+            AND ${table.leaseExpiresAt} IS NOT NULL)
+          OR (${table.status} <> 'running'
+            AND ${table.leaseOwner} IS NULL
+            AND ${table.leaseExpiresAt} IS NULL)`,
+    ),
+  ],
+);
+
+export const auditEvents = sqliteTable(
+  "audit_events",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    action: text("action").notNull(),
+    beforeState: text("before_state"),
+    afterState: text("after_state"),
+    relatedImportBatchId: text("related_import_batch_id").references(() => importBatches.id, {
+      onDelete: "set null",
+    }),
+    relatedRuleId: text("related_rule_id"),
+    relatedJobId: text("related_job_id").references(() => jobs.id, {
+      onDelete: "set null",
+    }),
+    requestId: text("request_id"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("audit_events_workspace_time_idx").on(table.workspaceId, table.createdAt),
+    index("audit_events_entity_idx").on(table.entityType, table.entityId, table.createdAt),
+    index("audit_events_actor_idx").on(table.actorUserId, table.createdAt),
+    index("audit_events_import_idx").on(table.relatedImportBatchId),
+    index("audit_events_job_idx").on(table.relatedJobId),
+    check(
+      "audit_events_state_check",
+      sql`(${table.beforeState} IS NULL OR json_valid(${table.beforeState}))
+          AND (${table.afterState} IS NULL OR json_valid(${table.afterState}))`,
+    ),
+  ],
+);
+
 export const financialSchema = {
   accounts,
   ownedAccountIdentifiers,
@@ -610,7 +707,13 @@ export const financialSchema = {
   transactionRevisions,
 };
 
+export const infrastructureSchema = {
+  jobs,
+  auditEvents,
+};
+
 export const databaseSchema = {
   ...securitySchema,
   ...financialSchema,
+  ...infrastructureSchema,
 };

@@ -56,6 +56,7 @@ describe("financial domain migration", () => {
     expect(sqlite.prepare("SELECT id FROM _spendlens_migrations ORDER BY id").all()).toEqual([
       { id: "0000_security_foundation" },
       { id: "0001_financial_domain" },
+      { id: "0002_api_jobs_audit" },
     ]);
     sqlite.close();
   });
