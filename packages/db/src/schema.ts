@@ -526,6 +526,9 @@ export const transactionSplits = sqliteTable(
       .references(() => categories.id, { onDelete: "restrict" }),
     amountMinor: integer("amount_minor").notNull(),
     currency: text("currency").notNull(),
+    scope: text("scope", { enum: ["personal", "business"] })
+      .notNull()
+      .default("personal"),
     note: text("note"),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
@@ -538,6 +541,39 @@ export const transactionSplits = sqliteTable(
       sql`typeof(${table.amountMinor}) = 'integer' AND ${table.amountMinor} > 0`,
     ),
     check("transaction_splits_currency_check", currencyCheck(table.currency)),
+  ],
+);
+
+export const metricInvalidations = sqliteTable(
+  "metric_invalidations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    transactionId: text("transaction_id").references(() => transactions.id, {
+      onDelete: "cascade",
+    }),
+    startAt: integer("start_at", { mode: "timestamp_ms" }),
+    endAt: integer("end_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    consumedAt: integer("consumed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("metric_invalidations_pending_idx").on(
+      table.workspaceId,
+      table.consumedAt,
+      table.createdAt,
+    ),
+    index("metric_invalidations_transaction_idx").on(table.transactionId),
+    check(
+      "metric_invalidations_range_check",
+      sql`(${table.startAt} IS NULL AND ${table.endAt} IS NULL)
+          OR (${table.startAt} IS NOT NULL
+            AND ${table.endAt} IS NOT NULL
+            AND ${table.startAt} <= ${table.endAt})`,
+    ),
   ],
 );
 
@@ -820,6 +856,7 @@ export const financialSchema = {
   transactionSources,
   transactionSplitSets,
   transactionSplits,
+  metricInvalidations,
   transactionNotes,
   tags,
   transactionTags,

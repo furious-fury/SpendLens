@@ -12,3 +12,6 @@ export * from "./splits.js";
 export * from "./taxonomy.js";
 export * from "./time.js";
 export * from "./transaction-identity.js";
+export * from "./transaction-workspace.js";
+export * from "./workspace-domain.js";
+export * from "./workspace-management.js";

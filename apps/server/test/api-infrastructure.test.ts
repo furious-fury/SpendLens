@@ -1,12 +1,17 @@
 import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  AccountSchema,
   apiPaths,
   ApiErrorSchema,
+  BulkTransactionResultSchema,
+  CategorySchema,
   ImportDeduplicationSummarySchema,
   ImportPreviewSchema,
   ImportProgressSchema,
   JobSchema,
+  TransactionListSchema,
+  TransactionSchema,
 } from "@spendlens/contracts";
 import { AuditLog, JobQueue, MemoryKeyProvider } from "@spendlens/db";
 import { afterEach, describe, expect, it } from "vitest";
@@ -45,6 +50,16 @@ describe("OpenAPI and structured API behavior", () => {
     expect(document.paths).toHaveProperty("/api/imports/previews/{importId}/commit");
     expect(document.paths).toHaveProperty("/api/imports/{importId}");
     expect(document.paths).toHaveProperty("/api/imports/{importId}/progress");
+    expect(document.paths).toHaveProperty("/api/transactions");
+    expect(document.paths).toHaveProperty("/api/transactions/bulk");
+    expect(document.paths).toHaveProperty("/api/transactions/{transactionId}");
+    expect(document.paths).toHaveProperty("/api/transactions/{transactionId}/splits");
+    expect(document.paths).toHaveProperty("/api/transactions/{transactionId}/transfer");
+    expect(document.paths).toHaveProperty("/api/accounts");
+    expect(document.paths).toHaveProperty("/api/accounts/{accountId}/identifiers");
+    expect(document.paths).toHaveProperty("/api/categories");
+    expect(document.paths).toHaveProperty("/api/categories/{categoryId}/merge");
+    expect(document.paths).toHaveProperty("/api/counterparties");
 
     const invalid = await fixture.app.request("/api/jobs/not-a-uuid", {
       headers: fixture.authHeaders(),
@@ -456,6 +471,204 @@ describe("privacy-safe logs and audit events", () => {
   });
 });
 
+describe("transaction workspace API", () => {
+  it("lists, filters, edits, splits, and bulk-updates transactions without changing raw rows", async () => {
+    const fixture = await initializedFixture();
+    const accountResponse = await fixture.app.request(apiPaths.accounts, {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        institutionName: "PalmPay",
+        institutionCode: "palmpay",
+        displayName: "PalmPay wallet",
+        accountType: "wallet",
+        baseCurrency: "NGN",
+        isOwned: true,
+      }),
+    });
+    const account = AccountSchema.parse(await accountResponse.json());
+    const categoryResponse = await fixture.app.request(apiPaths.categories, {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        name: "Client transport",
+        flags: { isExpense: true },
+      }),
+    });
+    const category = CategorySchema.parse(await categoryResponse.json());
+    const firstId = insertApiTransaction(fixture, account.id, {
+      amountMinor: 12_500,
+      narration: "Normalized transfer",
+      rawNarration: "RAW PALMPAY TRANSFER VALUE",
+    });
+    const secondId = insertApiTransaction(fixture, account.id, {
+      amountMinor: 8_000,
+      narration: "Second transaction",
+      occurredAt: Date.UTC(2026, 5, 18),
+    });
+
+    const listResponse = await fixture.app.request(
+      `${apiPaths.transactions}?search=raw%20palmpay&minimumAmountMinor=10000&scope=personal`,
+      { headers: fixture.authHeaders() },
+    );
+    const list = TransactionListSchema.parse(await listResponse.json());
+    expect(list.items.map(({ id }) => id)).toEqual([firstId]);
+    expect(list.items[0]?.source.rawNarration).toBe("RAW PALMPAY TRANSFER VALUE");
+
+    const updateResponse = await fixture.app.request(apiPaths.transaction(firstId), {
+      method: "PATCH",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        normalizedNarration: "Taxi to client",
+        categoryId: category.id,
+        scope: "business",
+        reviewState: "reviewed",
+        note: "June client visit",
+      }),
+    });
+    const updated = TransactionSchema.parse(await updateResponse.json());
+    expect(updated).toMatchObject({
+      normalizedNarration: "Taxi to client",
+      category: { id: category.id },
+      scope: "business",
+      note: "June client visit",
+      source: { rawNarration: "RAW PALMPAY TRANSFER VALUE" },
+    });
+    expect(
+      fixture.sqlite
+        .prepare(
+          `SELECT raw_narration AS rawNarration
+           FROM parsed_source_rows
+           WHERE raw_narration = 'RAW PALMPAY TRANSFER VALUE'`,
+        )
+        .get(),
+    ).toEqual({ rawNarration: "RAW PALMPAY TRANSFER VALUE" });
+
+    const invalidSplit = await fixture.app.request(apiPaths.transactionSplits(firstId), {
+      method: "PUT",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        splits: [
+          { amountMinor: 6_000, categoryId: category.id, scope: "business" },
+          { amountMinor: 6_499, categoryId: category.id, scope: "personal" },
+        ],
+      }),
+    });
+    expect(invalidSplit.status).toBe(400);
+
+    const splitResponse = await fixture.app.request(apiPaths.transactionSplits(firstId), {
+      method: "PUT",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        splits: [
+          { amountMinor: 6_000, categoryId: category.id, scope: "business" },
+          { amountMinor: 6_500, categoryId: category.id, scope: "personal" },
+        ],
+      }),
+    });
+    expect(TransactionSchema.parse(await splitResponse.json()).splits).toMatchObject([
+      { amountMinor: 6_000, scope: "business" },
+      { amountMinor: 6_500, scope: "personal" },
+    ]);
+
+    const bulkResponse = await fixture.app.request(apiPaths.bulkTransactions, {
+      method: "PATCH",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        transactionIds: [firstId, secondId],
+        changes: { categoryId: category.id, reviewState: "reviewed" },
+      }),
+    });
+    expect(BulkTransactionResultSchema.parse(await bulkResponse.json())).toEqual({
+      updatedCount: 2,
+      transactionIds: [firstId, secondId],
+    });
+    expect(
+      fixture.audit
+        .listForEntity(fixture.workspaceId, "transaction", firstId)
+        .map(({ action }) => action),
+    ).toEqual(["transaction.updated", "transaction.splits_replaced"]);
+    expect(
+      fixture.audit
+        .listForEntity(fixture.workspaceId, "transaction_bulk", fixture.workspaceId)
+        .map(({ action }) => action),
+    ).toEqual(["transaction.bulk_updated"]);
+    fixture.close();
+  });
+
+  it("registers owned identifiers safely and confirms both sides of an internal transfer", async () => {
+    const fixture = await initializedFixture();
+    const createAccount = async (displayName: string) => {
+      const response = await fixture.app.request(apiPaths.accounts, {
+        method: "POST",
+        headers: jsonHeaders(fixture),
+        body: JSON.stringify({
+          institutionName: displayName,
+          institutionCode: displayName.toLocaleLowerCase(),
+          displayName,
+          accountType: "wallet",
+          baseCurrency: "NGN",
+          isOwned: true,
+        }),
+      });
+      return AccountSchema.parse(await response.json());
+    };
+    const wallet = await createAccount("Wallet");
+    const savings = await createAccount("Savings");
+    const identifierResponse = await fixture.app.request(apiPaths.accountIdentifier(wallet.id), {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({
+        institutionCode: "palmpay",
+        accountNumber: "8123456789",
+      }),
+    });
+    expect(AccountSchema.parse(await identifierResponse.json()).maskedAccountNumber).toBe(
+      "•••• 6789",
+    );
+    const storedIdentifier = fixture.sqlite
+      .prepare(
+        `SELECT account_number_fingerprint AS fingerprint,
+                masked_account_number AS masked
+         FROM owned_account_identifiers`,
+      )
+      .get() as { fingerprint: string; masked: string };
+    expect(storedIdentifier).toMatchObject({
+      fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+      masked: "•••• 6789",
+    });
+    expect(JSON.stringify(storedIdentifier)).not.toContain("8123456789");
+
+    const debitId = insertApiTransaction(fixture, wallet.id, {
+      direction: "debit",
+      amountMinor: 50_000,
+      narration: "Move to savings",
+    });
+    const creditId = insertApiTransaction(fixture, savings.id, {
+      direction: "credit",
+      amountMinor: 50_000,
+      narration: "Move from wallet",
+    });
+    const transferResponse = await fixture.app.request(apiPaths.transactionTransfer(debitId), {
+      method: "POST",
+      headers: jsonHeaders(fixture),
+      body: JSON.stringify({ pairedTransactionId: creditId }),
+    });
+    expect(TransactionSchema.parse(await transferResponse.json())).toMatchObject({
+      transactionType: "transfer",
+      transfer: { status: "confirmed", pairedTransactionId: creditId },
+    });
+    const pairedResponse = await fixture.app.request(apiPaths.transaction(creditId), {
+      headers: fixture.authHeaders(),
+    });
+    expect(TransactionSchema.parse(await pairedResponse.json())).toMatchObject({
+      transactionType: "transfer",
+      transfer: { status: "confirmed", pairedTransactionId: debitId },
+    });
+    fixture.close();
+  });
+});
+
 describe("in-process job worker", () => {
   it("runs idempotent handlers and persists progress and results", async () => {
     const fixture = await initializedFixture();
@@ -570,4 +783,90 @@ function insertImport(fixture: Awaited<ReturnType<typeof initializedFixture>>): 
         'Africa/Lagos', 1, 1)`,
     )
     .run(fixture.importId, fixture.workspaceId, "a".repeat(64));
+}
+
+function jsonHeaders(fixture: Awaited<ReturnType<typeof initializedFixture>>): Headers {
+  const headers = fixture.authHeaders(true);
+  headers.set("content-type", "application/json");
+  return headers;
+}
+
+function insertApiTransaction(
+  fixture: Awaited<ReturnType<typeof initializedFixture>>,
+  accountId: string,
+  input: {
+    amountMinor: number;
+    narration: string;
+    occurredAt?: number;
+    direction?: "debit" | "credit";
+    rawNarration?: string;
+  },
+): string {
+  const transactionId = crypto.randomUUID();
+  const occurredAt = input.occurredAt ?? Date.UTC(2026, 5, 17, 11);
+  fixture.sqlite
+    .prepare(
+      `INSERT INTO transactions (
+        id, workspace_id, account_id, occurred_at_utc, source_timestamp,
+        source_timezone, direction, transaction_type, amount_minor, currency,
+        normalized_narration, scope, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, '2026-06-17 12:00:00', 'Africa/Lagos', ?,
+                'unclassified', ?, 'NGN', ?, 'personal', ?, ?)`,
+    )
+    .run(
+      transactionId,
+      fixture.workspaceId,
+      accountId,
+      occurredAt,
+      input.direction ?? "debit",
+      input.amountMinor,
+      input.narration,
+      occurredAt,
+      occurredAt,
+    );
+  if (input.rawNarration) {
+    const importId = crypto.randomUUID();
+    const sourceId = crypto.randomUUID();
+    fixture.sqlite
+      .prepare(
+        `INSERT INTO import_batches (
+          id, workspace_id, account_id, source_type, adapter_key, adapter_version,
+          source_filename, file_fingerprint, status, source_timezone, created_at, updated_at
+        ) VALUES (?, ?, ?, 'pdf', 'fixture', '1', 'fixture.pdf', ?,
+                  'committed', 'Africa/Lagos', 1, 1)`,
+      )
+      .run(
+        importId,
+        fixture.workspaceId,
+        accountId,
+        crypto.randomUUID().replaceAll("-", "").repeat(2),
+      );
+    fixture.sqlite
+      .prepare(
+        `INSERT INTO parsed_source_rows (
+          id, import_batch_id, source_row_index, source_timestamp, source_timezone,
+          occurred_at_utc, direction, amount_minor, currency, raw_narration,
+          row_fingerprint, raw_fields, created_at
+        ) VALUES (?, ?, 0, '2026-06-17 12:00:00', 'Africa/Lagos', ?, ?, ?, 'NGN',
+                  ?, ?, '{}', 1)`,
+      )
+      .run(
+        sourceId,
+        importId,
+        occurredAt,
+        input.direction ?? "debit",
+        input.amountMinor,
+        input.rawNarration,
+        crypto.randomUUID().replaceAll("-", "").repeat(2),
+      );
+    fixture.sqlite
+      .prepare(
+        `INSERT INTO transaction_sources (
+          transaction_id, parsed_source_row_id, import_batch_id,
+          link_type, match_confidence, created_at
+        ) VALUES (?, ?, ?, 'original', 'strong', 1)`,
+      )
+      .run(transactionId, sourceId, importId);
+  }
+  return transactionId;
 }

@@ -4,6 +4,7 @@ import { financialDomainMigrationSql } from "./financial-domain-migration.js";
 import { importPreviewMigrationSql } from "./import-preview-migration.js";
 import { importReconciliationMigrationSql } from "./import-reconciliation-migration.js";
 import { seedStarterTaxonomy } from "./taxonomy.js";
+import { transactionWorkspaceMigrationSql } from "./transaction-workspace-migration.js";
 
 interface Migration {
   id: string;
@@ -93,6 +94,10 @@ const migrations: Migration[] = [
   {
     id: "0004_import_reconciliation",
     sql: importReconciliationMigrationSql,
+  },
+  {
+    id: "0005_transaction_workspace",
+    sql: transactionWorkspaceMigrationSql,
   },
 ];
 

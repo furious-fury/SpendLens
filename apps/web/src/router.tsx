@@ -11,14 +11,15 @@ import {
   BookOpenText,
   Brain,
   FileArrowDown,
-  Bank,
   Receipt,
   SlidersHorizontal,
 } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
+import { AccountsPage } from "@/pages/accounts-page";
 import { OverviewPage } from "@/pages/overview-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
 import { SecuritySettingsPage } from "@/pages/security-settings-page";
+import { parseTransactionSearch, TransactionsPage } from "@/pages/transactions-page";
 
 const rootRoute = createRootRoute({
   component: AppShell,
@@ -57,14 +58,22 @@ const settingsRoute = createRoute({
   component: SecuritySettingsPage,
 });
 
+const transactionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/transactions",
+  validateSearch: parseTransactionSearch,
+  component: TransactionsPage,
+});
+
+const accountsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/accounts",
+  component: AccountsPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  placeholder(
-    "/transactions",
-    "Your transaction workspace",
-    "Search, filter, edit, split, and understand imported activity in one place.",
-    Receipt,
-  ),
+  transactionsRoute,
   placeholder(
     "/review",
     "Review uncertain activity",
@@ -107,12 +116,7 @@ const routeTree = rootRoute.addChildren([
     "Inspect, prioritize, disable, and update the rules behind automatic classifications.",
     SlidersHorizontal,
   ),
-  placeholder(
-    "/accounts",
-    "Manage your accounts",
-    "Register owned accounts so internal transfers never distort income or spending.",
-    Bank,
-  ),
+  accountsRoute,
   settingsRoute,
 ]);
 
