@@ -3,5 +3,7 @@ packages:
   - packages/*
 
 onlyBuiltDependencies:
+  - argon2
   - "@biomejs/biome"
+  - better-sqlite3-multiple-ciphers
   - esbuild

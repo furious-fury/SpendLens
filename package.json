@@ -14,6 +14,9 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint .",
+    "security:generate-secret": "pnpm --filter @spendlens/db build && pnpm --filter @spendlens/server security:generate-secret",
+    "security:recover": "pnpm --filter @spendlens/db build && pnpm --filter @spendlens/server security:recover",
+    "security:setup-token": "pnpm --filter @spendlens/db build && pnpm --filter @spendlens/server security:setup-token",
     "test": "pnpm --recursive test",
     "typecheck": "pnpm --recursive typecheck"
   },

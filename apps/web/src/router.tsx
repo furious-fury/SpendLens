@@ -13,12 +13,12 @@ import {
   FileArrowDown,
   Bank,
   Receipt,
-  GearSix,
   SlidersHorizontal,
 } from "@phosphor-icons/react";
 import { AppShell } from "@/components/app-shell";
 import { OverviewPage } from "@/pages/overview-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
+import { SecuritySettingsPage } from "@/pages/security-settings-page";
 
 const rootRoute = createRootRoute({
   component: AppShell,
@@ -49,6 +49,12 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: OverviewPage,
+});
+
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings",
+  component: SecuritySettingsPage,
 });
 
 const routeTree = rootRoute.addChildren([
@@ -107,12 +113,7 @@ const routeTree = rootRoute.addChildren([
     "Register owned accounts so internal transfers never distort income or spending.",
     Bank,
   ),
-  placeholder(
-    "/settings",
-    "Configure SpendLens",
-    "Control privacy, appearance, AI providers, security, backups, and local operation.",
-    GearSix,
-  ),
+  settingsRoute,
 ]);
 
 export const router = createRouter({
