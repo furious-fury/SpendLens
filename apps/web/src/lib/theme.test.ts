@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { readAccent, readAppearance } from "./theme";
+import { accents, readAccent, readAppearance } from "./theme";
 
 function storage(value: string | null) {
   return {
@@ -21,5 +22,16 @@ describe("theme preferences", () => {
   it("accepts supported preferences", () => {
     expect(readAppearance(storage("dark"))).toBe("dark");
     expect(readAccent(storage("teal"))).toBe("teal");
+  });
+
+  it("defines dashboard chart colours for light, dark, and every accent", () => {
+    const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+
+    expect(styles.match(/--chart-1:/g)).toHaveLength(2);
+    expect(styles.match(/--chart-5:/g)).toHaveLength(2);
+    for (const accent of accents) {
+      expect(styles).toContain(`html[data-accent="${accent}"]`);
+      expect(styles).toContain(`.dark[data-accent="${accent}"]`);
+    }
   });
 });

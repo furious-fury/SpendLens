@@ -396,6 +396,58 @@ describe("analytics cache invalidation", () => {
   });
 });
 
+describe("dashboard query performance", () => {
+  it("calculates several years of personal transactions within an interactive budget", () => {
+    const categoryId = starterCategoryId(WORKSPACE_ID, "groceries");
+    sqlite.transaction(() => {
+      for (let index = 0; index < 6_000; index += 1) {
+        const timestamp = Date.UTC(2020, 0, 1) + index * 9 * 60 * 60 * 1_000;
+        const date = new Date(timestamp).toISOString().slice(0, 10);
+        insertTransaction({
+          date,
+          direction: index % 5 === 0 ? "credit" : "debit",
+          amountMinor: 1_000 + (index % 200) * 100,
+          transactionType: index % 5 === 0 ? "income" : "expense",
+          categoryId,
+          counterpartyId: index % 5 === 0 ? EMPLOYER : STORE,
+        });
+      }
+    })();
+
+    const startedAt = performance.now();
+    const result = engine.query(WORKSPACE_ID, {
+      startDate: "2020-01-01",
+      endDate: "2026-12-31",
+      currency: "NGN",
+      accountIds: [ACCOUNT_ONE, ACCOUNT_TWO],
+      scopes: ["personal", "business"],
+      metricIds: [
+        "cashflow.total_inflow",
+        "cashflow.total_outflow",
+        "cashflow.net",
+        "cashflow.cumulative",
+        "cashflow.transaction_count",
+        "cashflow.largest_outflow",
+        "balance.closing",
+        "spending.by_category",
+        "spending.unusual",
+        "spending.recurring",
+        "quality.classification_coverage",
+        "quality.review_queue",
+        "quality.duplicate_sources",
+      ],
+      comparison: { mode: "none" },
+      excludeInternalTransfers: true,
+      useCache: false,
+    });
+    const durationMs = performance.now() - startedAt;
+
+    expect(result.metrics).toHaveLength(13);
+    expect(result.metrics.find(({ id }) => id === "cashflow.transaction_count")?.value).toBe(6_018);
+    expect(durationMs).toBeLessThan(3_000);
+  });
+});
+
 function query(metricIds?: AnalyticsMetricId[]): AnalyticsQuery {
   return {
     startDate: "2026-06-01",

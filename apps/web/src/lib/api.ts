@@ -9,6 +9,9 @@ import {
   AiProviderListSchema,
   AiProviderSettingSchema,
   type AiProviderUpdate,
+  type AnalyticsQuery,
+  AnalyticsRegistrySchema,
+  AnalyticsResultSchema,
   type ApplyReviewDecision,
   apiPaths,
   type BulkTransactionEdit,
@@ -338,6 +341,12 @@ export const api = {
   },
   startAiClassification(input: AiClassificationJobRequest) {
     return mutate(apiPaths.aiClassificationJobs, input, (value) => JobSchema.parse(value));
+  },
+  analyticsRegistry() {
+    return request(apiPaths.analyticsRegistry, (value) => AnalyticsRegistrySchema.parse(value));
+  },
+  analytics(input: AnalyticsQuery) {
+    return mutate(apiPaths.analyticsMetrics, input, (value) => AnalyticsResultSchema.parse(value));
   },
   job(jobId: string) {
     return request(apiPaths.job(jobId), (value) => JobSchema.parse(value));
