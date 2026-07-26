@@ -5,12 +5,14 @@
   "description": "Local-first financial statement intelligence",
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=22 <23",
+    "node": ">=22.13 <25",
     "pnpm": ">=10"
   },
   "scripts": {
     "build": "pnpm --filter @spendlens/contracts build && pnpm --filter @spendlens/db build && pnpm --filter @spendlens/web build && pnpm --filter @spendlens/server build",
+    "predev": "pnpm dev:doctor",
     "dev": "pnpm --parallel --filter @spendlens/server --filter @spendlens/web dev",
+    "dev:doctor": "node scripts/dev-doctor.mjs",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint .",
