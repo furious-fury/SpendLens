@@ -14,6 +14,7 @@ import {
   type EncryptedDatabaseOptions,
   createEncryptedDatabase,
   openEncryptedDatabase,
+  seedStarterTaxonomy,
   securityEvents,
   sessions,
   users,
@@ -150,6 +151,7 @@ export class SecurityService {
             updatedAt: now,
           })
           .run();
+        seedStarterTaxonomy(database.sqlite, workspaceId);
         database.db
           .insert(users)
           .values({

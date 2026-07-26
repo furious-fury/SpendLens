@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { DatabaseKeyProvider } from "./key-providers.js";
 import { assertDatabaseKey, serializeDatabaseKey } from "./key-providers.js";
 import { applyMigrations } from "./migrations.js";
-import { securitySchema } from "./schema.js";
+import { databaseSchema } from "./schema.js";
 
 export interface EncryptedDatabaseOptions {
   filePath: string;
@@ -17,7 +17,7 @@ export interface EncryptedDatabase {
   filePath: string;
   keyProvider: DatabaseKeyProvider;
   sqlite: Database.Database;
-  db: ReturnType<typeof drizzle<typeof securitySchema>>;
+  db: ReturnType<typeof drizzle<typeof databaseSchema>>;
   key: Buffer;
   close(): void;
   rekey(nextKey?: Buffer): Promise<Buffer>;
@@ -129,7 +129,7 @@ function buildDatabase(
     filePath: options.filePath,
     keyProvider: options.keyProvider,
     sqlite,
-    db: drizzle(sqlite, { schema: securitySchema }),
+    db: drizzle(sqlite, { schema: databaseSchema }),
     key: Buffer.from(key),
     close() {
       sqlite.close();
