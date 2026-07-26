@@ -1,5 +1,5 @@
 import { apiPaths, ServiceHealthSchema, type ServiceHealth } from "@spendlens/contracts";
-import { AuditLog, ImportPreviewStore, JobQueue } from "@spendlens/db";
+import { AuditLog, ImportPreviewStore, ImportReconciliationStore, JobQueue } from "@spendlens/db";
 import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
 import { secureHeaders } from "hono/secure-headers";
 import { AppError } from "./api/app-error.js";
@@ -34,6 +34,7 @@ export interface CreateAppOptions {
   jobs?: JobQueue;
   audit?: AuditLog;
   importPreviews?: ImportPreviewService;
+  importReconciler?: ImportReconciliationStore;
   importTemporaryRoot?: string;
   logger?: OperationalLogger;
 }
@@ -111,6 +112,7 @@ export function createApp(options: CreateAppOptions = {}) {
     const audit = options.audit ?? new AuditLog(sqlite);
     const importPreviews =
       options.importPreviews ?? new ImportPreviewService(new ImportPreviewStore(sqlite));
+    const importReconciler = options.importReconciler ?? new ImportReconciliationStore(sqlite);
 
     app.use("/api/*", requireApiAuthentication(security));
     app.route(
@@ -125,6 +127,7 @@ export function createApp(options: CreateAppOptions = {}) {
       "/",
       createImportRoutes({
         previews: importPreviews,
+        reconciler: importReconciler,
         audit,
         ...(options.importTemporaryRoot ? { temporaryRoot: options.importTemporaryRoot } : {}),
       }),

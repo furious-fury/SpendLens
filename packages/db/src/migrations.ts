@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { apiInfrastructureMigrationSql } from "./api-infrastructure-migration.js";
 import { financialDomainMigrationSql } from "./financial-domain-migration.js";
 import { importPreviewMigrationSql } from "./import-preview-migration.js";
+import { importReconciliationMigrationSql } from "./import-reconciliation-migration.js";
 import { seedStarterTaxonomy } from "./taxonomy.js";
 
 interface Migration {
@@ -88,6 +89,10 @@ const migrations: Migration[] = [
   {
     id: "0003_import_previews",
     sql: importPreviewMigrationSql,
+  },
+  {
+    id: "0004_import_reconciliation",
+    sql: importReconciliationMigrationSql,
   },
 ];
 

@@ -10,6 +10,7 @@ export interface ParsedImportRowInput {
   amountMinor: number;
   currency: string;
   narration: string;
+  fallbackFingerprint: string;
   rowFingerprint: string;
   rawFields: Record<string, unknown>;
 }
@@ -136,8 +137,8 @@ export class ImportPreviewStore {
           id, import_batch_id, source_row_index, source_transaction_id,
           source_reference, source_timestamp, source_timezone, occurred_at_utc,
           direction, amount_minor, currency, raw_narration, row_fingerprint,
-          raw_fields, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          fallback_fingerprint, raw_fields, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const row of input.rows) {
         insertRow.run(
@@ -154,6 +155,7 @@ export class ImportPreviewStore {
           row.currency,
           row.narration,
           row.rowFingerprint,
+          row.fallbackFingerprint,
           JSON.stringify(row.rawFields),
           now,
         );

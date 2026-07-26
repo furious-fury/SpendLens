@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   apiPaths,
   ApiErrorSchema,
+  ImportDeduplicationSummarySchema,
   ImportPreviewSchema,
   ImportProgressSchema,
   JobSchema,
@@ -39,6 +40,10 @@ describe("OpenAPI and structured API behavior", () => {
     expect(document.paths).toHaveProperty("/api/security/login");
     expect(document.paths).toHaveProperty("/api/jobs/{jobId}");
     expect(document.paths).toHaveProperty("/api/imports/previews");
+    expect(document.paths).toHaveProperty("/api/imports/previews/{importId}/reconcile");
+    expect(document.paths).toHaveProperty("/api/imports/previews/{importId}/decisions");
+    expect(document.paths).toHaveProperty("/api/imports/previews/{importId}/commit");
+    expect(document.paths).toHaveProperty("/api/imports/{importId}");
     expect(document.paths).toHaveProperty("/api/imports/{importId}/progress");
 
     const invalid = await fixture.app.request("/api/jobs/not-a-uuid", {
@@ -87,6 +92,191 @@ describe("OpenAPI and structured API behavior", () => {
       headers: fixture.authHeaders(),
     });
     expect(ImportPreviewSchema.parse(await stored.json())).toEqual(preview);
+
+    const analyzeHeaders = fixture.authHeaders(true);
+    analyzeHeaders.set("content-type", "application/json");
+    const analyzedResponse = await fixture.app.request(apiPaths.analyzeImport(preview.id), {
+      method: "POST",
+      headers: analyzeHeaders,
+      body: "{}",
+    });
+    const analyzed = ImportDeduplicationSummarySchema.parse(await analyzedResponse.json());
+    expect(analyzedResponse.status).toBe(200);
+    expect(analyzed).toMatchObject({
+      status: "analyzed",
+      willCreateAccount: true,
+      counts: {
+        new: 2,
+        duplicate: 0,
+        possibleDuplicate: 0,
+        conflict: 0,
+      },
+      pendingDecisionCount: 0,
+    });
+
+    const commitHeaders = fixture.authHeaders(true);
+    commitHeaders.set("content-type", "application/json");
+    const committedResponse = await fixture.app.request(apiPaths.commitImport(preview.id), {
+      method: "POST",
+      headers: commitHeaders,
+      body: JSON.stringify({ confirmUnreconciled: false }),
+    });
+    const committed = ImportDeduplicationSummarySchema.parse(await committedResponse.json());
+    expect(committed).toMatchObject({
+      status: "committed",
+      willCreateAccount: false,
+      commitResult: {
+        canonicalTransactionsCreated: 2,
+        duplicateSourcesLinked: 0,
+      },
+    });
+    const retried = await fixture.app.request(apiPaths.commitImport(preview.id), {
+      method: "POST",
+      headers: commitHeaders,
+      body: JSON.stringify({ confirmUnreconciled: false }),
+    });
+    expect(ImportDeduplicationSummarySchema.parse(await retried.json())).toEqual(committed);
+    expect(fixture.sqlite.prepare("SELECT count(*) AS count FROM transactions").get()).toEqual({
+      count: 2,
+    });
+    expect(
+      fixture.audit
+        .listForEntity(fixture.workspaceId, "import_batch", preview.id)
+        .map((event) => event.action),
+    ).toEqual(["import.preview_created", "import.duplicates_analyzed", "import.committed"]);
+
+    const overlapBytes = await createSanitizedPalmPayPdf({
+      marker: "overlap fixture version two",
+    });
+    const overlapHeaders = fixture.authHeaders(true);
+    overlapHeaders.set("content-type", "application/pdf");
+    const overlapResponse = await fixture.app.request(apiPaths.importPreviews, {
+      method: "POST",
+      headers: overlapHeaders,
+      body: overlapBytes,
+    });
+    const overlapPreview = ImportPreviewSchema.parse(await overlapResponse.json());
+    const overlapAnalyzeHeaders = fixture.authHeaders(true);
+    overlapAnalyzeHeaders.set("content-type", "application/json");
+    const overlapAnalysisResponse = await fixture.app.request(
+      apiPaths.analyzeImport(overlapPreview.id),
+      {
+        method: "POST",
+        headers: overlapAnalyzeHeaders,
+        body: "{}",
+      },
+    );
+    expect(
+      ImportDeduplicationSummarySchema.parse(await overlapAnalysisResponse.json()),
+    ).toMatchObject({
+      willCreateAccount: false,
+      counts: { new: 0, duplicate: 2 },
+    });
+    const overlapCommitHeaders = fixture.authHeaders(true);
+    overlapCommitHeaders.set("content-type", "application/json");
+    const overlapCommit = await fixture.app.request(apiPaths.commitImport(overlapPreview.id), {
+      method: "POST",
+      headers: overlapCommitHeaders,
+      body: JSON.stringify({ confirmUnreconciled: false }),
+    });
+    expect(ImportDeduplicationSummarySchema.parse(await overlapCommit.json())).toMatchObject({
+      commitResult: {
+        canonicalTransactionsCreated: 0,
+        duplicateSourcesLinked: 2,
+      },
+    });
+    expect(fixture.sqlite.prepare("SELECT count(*) AS count FROM transactions").get()).toEqual({
+      count: 2,
+    });
+    expect(
+      fixture.sqlite.prepare("SELECT count(*) AS count FROM transaction_sources").get(),
+    ).toEqual({ count: 4 });
+
+    const fallbackBytes = await createSanitizedPalmPayPdf({
+      marker: "fallback fixture version three",
+    });
+    const fallbackHeaders = fixture.authHeaders(true);
+    fallbackHeaders.set("content-type", "application/pdf");
+    const fallbackResponse = await fixture.app.request(apiPaths.importPreviews, {
+      method: "POST",
+      headers: fallbackHeaders,
+      body: fallbackBytes,
+    });
+    const fallbackPreview = ImportPreviewSchema.parse(await fallbackResponse.json());
+    fixture.sqlite
+      .prepare(
+        `UPDATE parsed_source_rows SET
+          source_transaction_id = NULL, source_reference = NULL
+         WHERE import_batch_id = ?`,
+      )
+      .run(fallbackPreview.id);
+    const fallbackAnalyzeHeaders = fixture.authHeaders(true);
+    fallbackAnalyzeHeaders.set("content-type", "application/json");
+    const fallbackAnalysisResponse = await fixture.app.request(
+      apiPaths.analyzeImport(fallbackPreview.id),
+      {
+        method: "POST",
+        headers: fallbackAnalyzeHeaders,
+        body: "{}",
+      },
+    );
+    const fallbackAnalysis = ImportDeduplicationSummarySchema.parse(
+      await fallbackAnalysisResponse.json(),
+    );
+    expect(fallbackAnalysis).toMatchObject({
+      counts: { possibleDuplicate: 2 },
+      pendingDecisionCount: 2,
+    });
+    const decisionHeaders = fixture.authHeaders(true);
+    decisionHeaders.set("content-type", "application/json");
+    const decisionResponse = await fixture.app.request(
+      apiPaths.importDecisions(fallbackPreview.id),
+      {
+        method: "POST",
+        headers: decisionHeaders,
+        body: JSON.stringify({
+          decisions: [
+            {
+              decisionId: fallbackAnalysis.attentionItems[0]?.decisionId,
+              action: "confirm_duplicate",
+            },
+            {
+              decisionId: fallbackAnalysis.attentionItems[1]?.decisionId,
+              action: "keep_separate",
+            },
+          ],
+        }),
+      },
+    );
+    expect(ImportDeduplicationSummarySchema.parse(await decisionResponse.json())).toMatchObject({
+      pendingDecisionCount: 0,
+    });
+    const fallbackCommitHeaders = fixture.authHeaders(true);
+    fallbackCommitHeaders.set("content-type", "application/json");
+    const fallbackCommit = await fixture.app.request(apiPaths.commitImport(fallbackPreview.id), {
+      method: "POST",
+      headers: fallbackCommitHeaders,
+      body: JSON.stringify({ confirmUnreconciled: false }),
+    });
+    expect(ImportDeduplicationSummarySchema.parse(await fallbackCommit.json())).toMatchObject({
+      commitResult: {
+        canonicalTransactionsCreated: 1,
+        duplicateSourcesLinked: 1,
+      },
+    });
+    expect(fixture.sqlite.prepare("SELECT count(*) AS count FROM transactions").get()).toEqual({
+      count: 3,
+    });
+
+    const duplicateHeaders = fixture.authHeaders(true);
+    duplicateHeaders.set("content-type", "application/pdf");
+    const duplicate = await fixture.app.request(apiPaths.importPreviews, {
+      method: "POST",
+      headers: duplicateHeaders,
+      body: bytes,
+    });
+    expect(duplicate.status).toBe(409);
+    expect(ApiErrorSchema.parse(await duplicate.json()).error.code).toBe("DUPLICATE_IMPORT");
     fixture.close();
   });
 
