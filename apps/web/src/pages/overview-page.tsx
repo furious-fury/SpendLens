@@ -1,94 +1,251 @@
-import { ArrowLineDown, ArrowLineUp, ArrowsLeftRight, Question } from "@phosphor-icons/react";
+import {
+  ArrowClockwise,
+  ArrowsLeftRight,
+  FileArrowDown,
+  WarningCircle,
+} from "@phosphor-icons/react";
+import type { AnalyticsMetricId, AnalyticsQuery } from "@spendlens/contracts";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import {
+  DashboardFilters,
+  type DashboardFiltersValue,
+  datesForLatestTransaction,
+  initialDashboardDates,
+} from "@/components/dashboard-filters";
+import { OverviewDashboard } from "@/components/overview-dashboard";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { api } from "@/lib/api";
 
-const metrics = [
-  { label: "Total inflow", icon: ArrowLineDown },
-  { label: "Total outflow", icon: ArrowLineUp },
-  { label: "Net cash flow", icon: ArrowsLeftRight },
-  { label: "Closing balance", icon: Question },
-];
+const OVERVIEW_METRICS = [
+  "cashflow.total_inflow",
+  "cashflow.total_outflow",
+  "cashflow.net",
+  "cashflow.cumulative",
+  "cashflow.transaction_count",
+  "cashflow.largest_outflow",
+  "balance.closing",
+  "spending.by_category",
+  "spending.unusual",
+  "spending.recurring",
+  "quality.classification_coverage",
+  "quality.review_queue",
+  "quality.duplicate_sources",
+] satisfies AnalyticsMetricId[];
+
+function initialFilters(): DashboardFiltersValue {
+  return {
+    ...initialDashboardDates(),
+    currency: "NGN",
+    accountIds: [],
+    scopes: ["personal", "business"],
+    comparison: { mode: "previous_period" },
+  };
+}
 
 export function OverviewPage() {
+  const [filters, setFilters] = useState<DashboardFiltersValue>(initialFilters);
+  const [filtersInitialized, setFiltersInitialized] = useState(false);
+  const accountsQuery = useQuery({
+    queryKey: ["accounts"],
+    queryFn: api.accounts,
+  });
+  const latestTransactionQuery = useQuery({
+    queryKey: ["transactions", "latest-overview"],
+    queryFn: () => api.transactions({ limit: 1, sort: "occurredAt", direction: "desc" }),
+  });
+  const accounts = accountsQuery.data?.items.filter(({ archivedAt }) => archivedAt === null) ?? [];
+
+  useEffect(() => {
+    if (filtersInitialized || !accountsQuery.data || latestTransactionQuery.isPending) {
+      return;
+    }
+    const latest = latestTransactionQuery.data?.items[0];
+    const selectedAccounts = accountsQuery.data.items.filter(
+      ({ archivedAt }) => archivedAt === null,
+    );
+    setFilters((current) => ({
+      ...current,
+      ...(latest ? datesForLatestTransaction(latest.occurredAt) : {}),
+      accountIds: selectedAccounts.map(({ id }) => id),
+      currency: latest?.currency ?? selectedAccounts[0]?.baseCurrency ?? current.currency,
+    }));
+    setFiltersInitialized(true);
+  }, [
+    accountsQuery.data,
+    filtersInitialized,
+    latestTransactionQuery.data,
+    latestTransactionQuery.isPending,
+  ]);
+
+  const queryInput: AnalyticsQuery = {
+    ...filters,
+    metricIds: OVERVIEW_METRICS,
+    excludeInternalTransfers: true,
+    useCache: true,
+  };
+  const validRange =
+    filters.startDate.length === 10 &&
+    filters.endDate.length === 10 &&
+    filters.startDate <= filters.endDate;
+  const analyticsQuery = useQuery({
+    queryKey: ["analytics", "overview", queryInput],
+    queryFn: () => api.analytics(queryInput),
+    enabled:
+      filtersInitialized && accounts.length > 0 && filters.accountIds.length > 0 && validRange,
+    placeholderData: (previous) => previous,
+  });
+
+  if (accountsQuery.isPending || latestTransactionQuery.isPending || !filtersInitialized) {
+    return <DashboardSkeleton />;
+  }
+
+  if (accountsQuery.isError || latestTransactionQuery.isError) {
+    return (
+      <DashboardError
+        message="SpendLens could not load your accounts and latest activity."
+        onRetry={() => {
+          void accountsQuery.refetch();
+          void latestTransactionQuery.refetch();
+        }}
+      />
+    );
+  }
+
+  if (accounts.length === 0) {
+    return (
+      <DashboardEmpty
+        title="No financial accounts yet"
+        description="Import a statement or add an account to start building your private financial overview."
+      />
+    );
+  }
+
+  const hasTransactions = (latestTransactionQuery.data?.items.length ?? 0) > 0;
+
   return (
     <div className="space-y-5">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Cash-flow summary">
-        {metrics.map(({ label, icon: Icon }) => (
-          <Card key={label}>
-            <CardHeader className="flex-row items-start justify-between gap-4 pb-3">
-              <div>
-                <CardDescription>{label}</CardDescription>
-                <CardTitle className="mt-2 font-tabular text-2xl">₦—</CardTitle>
-              </div>
-              <span className="grid size-9 place-items-center rounded-lg bg-primary/8 text-primary">
-                <Icon className="size-[18px]" weight="regular" />
-              </span>
-            </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground">Waiting for your first statement</p>
-            </CardContent>
-          </Card>
-        ))}
-      </section>
+      <DashboardFilters
+        accounts={accounts}
+        value={filters}
+        onChange={setFilters}
+        disabled={analyticsQuery.isPending}
+      />
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
-        <Card className="min-h-[360px]">
-          <CardHeader className="border-b border-border">
-            <CardTitle>Money movement</CardTitle>
-            <CardDescription>Inflow and outflow will appear here after an import.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid min-h-[276px] place-items-center">
-            <EmptyState
-              title="No financial history yet"
-              description="Import a PalmPay statement to build your private financial timeline."
-            />
-          </CardContent>
-        </Card>
+      {!validRange && (
+        <p className="rounded-lg border border-danger/25 bg-danger/8 px-4 py-3 text-sm text-danger">
+          The dashboard start date must not be after the end date.
+        </p>
+      )}
 
-        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">
-          <Card>
-            <CardHeader>
-              <CardDescription>Classification quality</CardDescription>
-              <CardTitle className="font-tabular text-2xl">—</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                <div className="h-full w-0 bg-primary" />
-              </div>
-              <p className="mt-3 text-xs text-muted-foreground">
-                Review coverage will appear after classification.
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardDescription>Needs attention</CardDescription>
-              <CardTitle className="font-tabular text-2xl">0 items</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Button asChild variant="outline" className="w-full">
-                <Link to="/review">Open review queue</Link>
-              </Button>
-            </CardContent>
-          </Card>
+      {!hasTransactions ? (
+        <DashboardEmpty
+          title="No financial history yet"
+          description="Import a PalmPay statement to calculate cash flow, spending patterns, and classification quality."
+        />
+      ) : analyticsQuery.isPending ? (
+        <DashboardContentSkeleton />
+      ) : analyticsQuery.isError ? (
+        <DashboardError
+          message={
+            analyticsQuery.error instanceof Error
+              ? analyticsQuery.error.message
+              : "SpendLens could not calculate this overview."
+          }
+          onRetry={() => void analyticsQuery.refetch()}
+        />
+      ) : analyticsQuery.data ? (
+        <div className="relative">
+          {analyticsQuery.isFetching && (
+            <div
+              className="absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-full border border-border bg-background/90 px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur"
+              role="status"
+            >
+              <ArrowClockwise className="size-3 animate-spin" aria-hidden="true" />
+              Updating
+            </div>
+          )}
+          <OverviewDashboard result={analyticsQuery.data} />
         </div>
-      </section>
+      ) : null}
     </div>
   );
 }
 
-function EmptyState({ description, title }: { description: string; title: string }) {
+function DashboardSkeleton() {
   return (
-    <div className="max-w-sm text-center">
-      <span className="mx-auto grid size-11 place-items-center rounded-xl border border-border bg-muted/40 text-muted-foreground">
-        <ArrowsLeftRight className="size-5" weight="regular" />
-      </span>
-      <h2 className="mt-4 font-semibold tracking-tight">{title}</h2>
-      <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{description}</p>
-      <Button asChild className="mt-5">
-        <Link to="/imports">Import a statement</Link>
-      </Button>
+    <div className="space-y-5" role="status" aria-label="Loading dashboard" aria-busy="true">
+      <div className="h-[150px] animate-pulse rounded-xl border border-border bg-muted/40 sm:h-[86px]" />
+      <DashboardContentSkeleton />
     </div>
+  );
+}
+
+function DashboardContentSkeleton() {
+  return (
+    <div className="space-y-5" role="status" aria-label="Calculating dashboard" aria-busy="true">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {["inflow", "outflow", "net", "balance"].map((key) => (
+          <div
+            key={key}
+            className="h-36 animate-pulse rounded-xl border border-border bg-muted/40"
+          />
+        ))}
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,1fr)]">
+        <div className="h-[370px] animate-pulse rounded-xl border border-border bg-muted/40" />
+        <div className="h-[370px] animate-pulse rounded-xl border border-border bg-muted/40" />
+      </div>
+      <div className="grid gap-5 lg:grid-cols-3">
+        {["categories", "unusual", "recurring"].map((key) => (
+          <div
+            key={key}
+            className="h-64 animate-pulse rounded-xl border border-border bg-muted/40"
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DashboardEmpty({ description, title }: { description: string; title: string }) {
+  return (
+    <Card>
+      <CardContent className="grid min-h-[420px] place-items-center p-6">
+        <div className="max-w-md text-center">
+          <span className="mx-auto grid size-12 place-items-center rounded-xl border border-border bg-muted/40 text-muted-foreground">
+            <ArrowsLeftRight className="size-5" aria-hidden="true" />
+          </span>
+          <h2 className="mt-4 text-lg font-semibold tracking-tight">{title}</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+          <Button asChild className="mt-5">
+            <Link to="/imports">
+              <FileArrowDown />
+              Import a statement
+            </Link>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DashboardError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <Card className="border-danger/25">
+      <CardContent className="grid min-h-72 place-items-center p-6">
+        <div className="max-w-md text-center">
+          <WarningCircle className="mx-auto size-7 text-danger" aria-hidden="true" />
+          <h2 className="mt-3 font-semibold">Overview unavailable</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">{message}</p>
+          <Button type="button" variant="outline" className="mt-5" onClick={onRetry}>
+            <ArrowClockwise />
+            Try again
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

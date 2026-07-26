@@ -12,14 +12,19 @@ import {
   createRouter,
   type ErrorComponentProps,
 } from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
 import { AppShell } from "@/components/app-shell";
 import { AccountsPage } from "@/pages/accounts-page";
-import { OverviewPage } from "@/pages/overview-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
 import { ReviewPage } from "@/pages/review-page";
 import { RulesPage } from "@/pages/rules-page";
 import { SecuritySettingsPage } from "@/pages/security-settings-page";
 import { parseTransactionSearch, TransactionsPage } from "@/pages/transactions-page";
+
+const OverviewPage = lazy(async () => {
+  const module = await import("@/pages/overview-page");
+  return { default: module.OverviewPage };
+});
 
 const rootRoute = createRootRoute({
   component: AppShell,
@@ -49,7 +54,19 @@ function placeholder<const TPath extends string>(
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: OverviewPage,
+  component: () => (
+    <Suspense
+      fallback={
+        <div
+          className="h-[420px] animate-pulse rounded-xl border border-border bg-muted/40"
+          role="status"
+          aria-label="Loading overview"
+        />
+      }
+    >
+      <OverviewPage />
+    </Suspense>
+  ),
 });
 
 const settingsRoute = createRoute({
