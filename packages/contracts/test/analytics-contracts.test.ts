@@ -52,7 +52,7 @@ describe("analytics contracts", () => {
   });
 
   it("keeps the registry and response metric identifiers closed and finite", () => {
-    expect(AnalyticsMetricIdSchema.options).toHaveLength(44);
+    expect(AnalyticsMetricIdSchema.options).toHaveLength(55);
     expect(() => AnalyticsMetricIdSchema.parse("cashflow.imaginary")).toThrow();
     expect(() =>
       AnalyticsResultSchema.parse({

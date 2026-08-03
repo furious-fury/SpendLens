@@ -1,11 +1,4 @@
-import {
-  ArrowLineDown,
-  ArrowLineUp,
-  ArrowsLeftRight,
-  Brain,
-  FileArrowDown,
-  Receipt,
-} from "@phosphor-icons/react";
+import { FileArrowDown, Receipt } from "@phosphor-icons/react";
 import {
   createRootRoute,
   createRoute,
@@ -20,10 +13,31 @@ import { ReviewPage } from "@/pages/review-page";
 import { RulesPage } from "@/pages/rules-page";
 import { SecuritySettingsPage } from "@/pages/security-settings-page";
 import { parseTransactionSearch, TransactionsPage } from "@/pages/transactions-page";
+import { parseInsightSearch } from "@/lib/insights";
 
 const OverviewPage = lazy(async () => {
   const module = await import("@/pages/overview-page");
   return { default: module.OverviewPage };
+});
+
+const SpendingPage = lazy(async () => {
+  const module = await import("@/pages/insights-page");
+  return { default: module.SpendingPage };
+});
+
+const IncomePage = lazy(async () => {
+  const module = await import("@/pages/insights-page");
+  return { default: module.IncomePage };
+});
+
+const CashFlowPage = lazy(async () => {
+  const module = await import("@/pages/insights-page");
+  return { default: module.CashFlowPage };
+});
+
+const BehaviourPage = lazy(async () => {
+  const module = await import("@/pages/insights-page");
+  return { default: module.BehaviourPage };
 });
 
 const rootRoute = createRootRoute({
@@ -100,34 +114,38 @@ const rulesRoute = createRoute({
   component: RulesPage,
 });
 
+function insightRoute(
+  path: "/spending" | "/income" | "/cash-flow" | "/behaviour",
+  Page: typeof SpendingPage,
+) {
+  return createRoute({
+    getParentRoute: () => rootRoute,
+    path,
+    validateSearch: parseInsightSearch,
+    component: () => (
+      <Suspense
+        fallback={
+          <div
+            className="h-[520px] animate-pulse rounded-xl border border-border bg-muted/40"
+            role="status"
+            aria-label="Loading detailed insights"
+          />
+        }
+      >
+        <Page />
+      </Suspense>
+    ),
+  });
+}
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   transactionsRoute,
   reviewRoute,
-  placeholder(
-    "/spending",
-    "Understand your spending",
-    "Explore categories, counterparties, recurring expenses, fees, and unusual activity.",
-    ArrowLineUp,
-  ),
-  placeholder(
-    "/income",
-    "Understand your income",
-    "Compare sources, timing, recurrence, concentration, and genuine income versus refunds.",
-    ArrowLineDown,
-  ),
-  placeholder(
-    "/cash-flow",
-    "Follow your cash flow",
-    "See inflow, outflow, cumulative movement, and account-level activity over time.",
-    ArrowsLeftRight,
-  ),
-  placeholder(
-    "/behaviour",
-    "See your financial patterns",
-    "Explore how and when you move money without turning your finances into a score.",
-    Brain,
-  ),
+  insightRoute("/spending", SpendingPage),
+  insightRoute("/income", IncomePage),
+  insightRoute("/cash-flow", CashFlowPage),
+  insightRoute("/behaviour", BehaviourPage),
   placeholder(
     "/imports",
     "Import a statement",

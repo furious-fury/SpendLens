@@ -59,6 +59,7 @@ interface Allocation {
   categoryIsExpense: boolean;
   categoryIsEssential: boolean;
   categoryIsDiscretionary: boolean;
+  categoryIsSavings: boolean;
   categoryIsRefund: boolean;
   categoryIsFee: boolean;
   categoryIsCashWithdrawal: boolean;
@@ -112,6 +113,7 @@ interface AllocationRow {
   is_expense: number | null;
   is_essential: number | null;
   is_discretionary: number | null;
+  is_savings: number | null;
   is_refund: number | null;
   is_fee: number | null;
   is_cash_withdrawal: number | null;
@@ -342,6 +344,13 @@ function recurringMetric(rows: readonly Allocation[]): CalculatedMetric {
     }))
     .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label));
   return available(sum(recurring), recurring, breakdown);
+}
+
+function nonRecurringRows(rows: readonly Allocation[]): Allocation[] {
+  const recurringIds = new Set(
+    [...recurringGroups(rows).values()].flatMap((group) => group.map((row) => row.transactionId)),
+  );
+  return rows.filter((row) => !recurringIds.has(row.transactionId));
 }
 
 function unusualRows(rows: readonly Allocation[]): Allocation[] {
@@ -585,6 +594,67 @@ const REGISTRY: MetricRegistration[] = [
   ),
   metric(
     definition(
+      "cashflow.by_day",
+      "Daily net movement",
+      "Inflows minus outflows for each local calendar day, excluding confirmed internal transfers by default.",
+      "minor_units",
+      ["day"],
+    ),
+    (context) => {
+      const rows = movementRows(context);
+      return available(
+        rows.reduce(
+          (total, row) => total + (row.direction === "credit" ? row.amountMinor : -row.amountMinor),
+          0,
+        ),
+        rows,
+        grouped(
+          rows,
+          (row) => localDate(context, row.occurredAt),
+          (row) => localDate(context, row.occurredAt),
+          (group) =>
+            group.reduce(
+              (total, row) =>
+                total + (row.direction === "credit" ? row.amountMinor : -row.amountMinor),
+              0,
+            ),
+        ).sort((left, right) => left.key.localeCompare(right.key)),
+      );
+    },
+  ),
+  metric(
+    definition(
+      "cashflow.by_account",
+      "Net movement by account",
+      "Inflows minus outflows grouped by selected source account.",
+      "minor_units",
+      ["account"],
+      ["amount", "direction", "account"],
+    ),
+    (context) => {
+      const rows = movementRows(context);
+      return available(
+        rows.reduce(
+          (total, row) => total + (row.direction === "credit" ? row.amountMinor : -row.amountMinor),
+          0,
+        ),
+        rows,
+        grouped(
+          rows,
+          (row) => row.accountId,
+          (row) => row.accountName,
+          (group) =>
+            group.reduce(
+              (total, row) =>
+                total + (row.direction === "credit" ? row.amountMinor : -row.amountMinor),
+              0,
+            ),
+        ),
+      );
+    },
+  ),
+  metric(
+    definition(
       "cashflow.transaction_count",
       "Transaction count",
       "Number of distinct cash movements in the selected period.",
@@ -705,6 +775,28 @@ const REGISTRY: MetricRegistration[] = [
   ),
   metric(
     definition(
+      "spending.by_day",
+      "Daily spending",
+      "Classified spending grouped by local calendar day.",
+      "minor_units",
+      ["day"],
+      ["amount", "occurredAt", "direction", "transactionType"],
+    ),
+    (context) => {
+      const rows = spendingRows(context);
+      return available(
+        sum(rows),
+        rows,
+        grouped(
+          rows,
+          (row) => localDate(context, row.occurredAt),
+          (row) => localDate(context, row.occurredAt),
+        ).sort((left, right) => left.key.localeCompare(right.key)),
+      );
+    },
+  ),
+  metric(
+    definition(
       "spending.concentration",
       "Spending concentration",
       "Share of spending attributable to the three largest counterparties.",
@@ -751,6 +843,20 @@ const REGISTRY: MetricRegistration[] = [
           }))
           .sort((left, right) => right.value - left.value),
       );
+    },
+  ),
+  metric(
+    definition(
+      "spending.variable",
+      "Variable spending",
+      "Classified spending that is not part of a detected recurring cadence.",
+      "minor_units",
+      ["transaction"],
+      ["amount", "occurredAt", "counterparty", "narration"],
+    ),
+    (context) => {
+      const rows = nonRecurringRows(spendingRows(context));
+      return available(sum(rows), rows);
     },
   ),
   metric(
@@ -809,6 +915,28 @@ const REGISTRY: MetricRegistration[] = [
   ),
   metric(
     definition(
+      "income.by_day",
+      "Daily income",
+      "Confirmed income grouped by local calendar day.",
+      "minor_units",
+      ["day"],
+      ["amount", "occurredAt", "transactionType"],
+    ),
+    (context) => {
+      const rows = incomeRows(context);
+      return available(
+        sum(rows),
+        rows,
+        grouped(
+          rows,
+          (row) => localDate(context, row.occurredAt),
+          (row) => localDate(context, row.occurredAt),
+        ).sort((left, right) => left.key.localeCompare(right.key)),
+      );
+    },
+  ),
+  metric(
+    definition(
       "income.concentration",
       "Income concentration",
       "Share of income attributable to the three largest sources.",
@@ -855,6 +983,20 @@ const REGISTRY: MetricRegistration[] = [
         months.reduce((total, item) => total + (item.value - mean) ** 2, 0) / months.length;
       const coefficient = mean === 0 ? 0 : Math.round((Math.sqrt(variance) / mean) * 10_000);
       return available(coefficient, rows, months);
+    },
+  ),
+  metric(
+    definition(
+      "income.irregular",
+      "Irregular income",
+      "Confirmed income that is not part of a detected recurring cadence.",
+      "minor_units",
+      ["transaction"],
+      ["amount", "occurredAt", "counterparty", "narration"],
+    ),
+    (context) => {
+      const rows = nonRecurringRows(incomeRows(context));
+      return available(sum(rows), rows);
     },
   ),
   metric(
@@ -964,6 +1106,67 @@ const REGISTRY: MetricRegistration[] = [
   ),
   metric(
     definition(
+      "behaviour.activity_by_day",
+      "Activity by day",
+      "Distinct transactions grouped by local calendar day.",
+      "count",
+      ["day"],
+      ["occurredAt"],
+    ),
+    (context) => {
+      const rows = uniqueTransactions(context.allocations);
+      return available(
+        rows.length,
+        rows,
+        grouped(
+          rows,
+          (row) => localDate(context, row.occurredAt),
+          (row) => localDate(context, row.occurredAt),
+          (group) => uniqueTransactions(group).length,
+        ).sort((left, right) => left.key.localeCompare(right.key)),
+      );
+    },
+  ),
+  metric(
+    definition(
+      "behaviour.average_daily_activity",
+      "Average daily activity",
+      "Average number of distinct transactions per calendar day in the selected period.",
+      "count",
+      ["day"],
+      ["occurredAt"],
+    ),
+    (context) => {
+      const rows = uniqueTransactions(context.allocations);
+      const days = Math.max(1, Math.round((context.endAt - context.startAt) / DAY_MS));
+      return available(rows.length / days, rows);
+    },
+  ),
+  metric(
+    definition(
+      "behaviour.account_usage",
+      "Account usage",
+      "Distinct transactions grouped by source account.",
+      "count",
+      ["account"],
+      ["account"],
+    ),
+    (context) => {
+      const rows = uniqueTransactions(context.allocations);
+      return available(
+        rows.length,
+        rows,
+        grouped(
+          rows,
+          (row) => row.accountId,
+          (row) => row.accountName,
+          (group) => uniqueTransactions(group).length,
+        ),
+      );
+    },
+  ),
+  metric(
+    definition(
       "behaviour.weekend_share",
       "Weekend activity share",
       "Share of distinct transactions occurring on Saturday or Sunday.",
@@ -989,6 +1192,38 @@ const REGISTRY: MetricRegistration[] = [
     ),
     (context) => {
       const rows = spendingRows(context);
+      return available(sum(rows), rows);
+    },
+  ),
+  metric(
+    definition(
+      "behaviour.expense_income_ratio",
+      "Expense-to-income ratio",
+      "Classified spending divided by confirmed income, excluding transfers and refunds.",
+      "basis_points",
+      ["total"],
+      ["amount", "direction", "transactionType"],
+    ),
+    (context) => {
+      const spending = spendingRows(context);
+      const income = incomeRows(context);
+      const incomeTotal = sum(income);
+      return incomeTotal === 0
+        ? unavailable("An expense-to-income ratio needs confirmed income in the period.")
+        : available(Math.round((sum(spending) / incomeTotal) * 10_000), [...spending, ...income]);
+    },
+  ),
+  metric(
+    definition(
+      "behaviour.savings_transfers",
+      "Identified savings movement",
+      "Transactions assigned to categories explicitly marked as savings.",
+      "minor_units",
+      ["transaction"],
+      ["amount", "category.isSavings"],
+    ),
+    (context) => {
+      const rows = context.allocations.filter((row) => row.categoryIsSavings);
       return available(sum(rows), rows);
     },
   ),
@@ -1422,6 +1657,7 @@ export class AnalyticsEngine {
            COALESCE(sc.is_expense, pc.is_expense, 0) AS is_expense,
            COALESCE(sc.is_essential, pc.is_essential, 0) AS is_essential,
            COALESCE(sc.is_discretionary, pc.is_discretionary, 0) AS is_discretionary,
+           COALESCE(sc.is_savings, pc.is_savings, 0) AS is_savings,
            COALESCE(sc.is_refund, pc.is_refund, 0) AS is_refund,
            COALESCE(sc.is_fee, pc.is_fee, 0) AS is_fee,
            COALESCE(sc.is_cash_withdrawal, pc.is_cash_withdrawal, 0) AS is_cash_withdrawal,
@@ -1512,6 +1748,7 @@ export class AnalyticsEngine {
         categoryIsExpense: row.is_expense === 1,
         categoryIsEssential: row.is_essential === 1,
         categoryIsDiscretionary: row.is_discretionary === 1,
+        categoryIsSavings: row.is_savings === 1,
         categoryIsRefund: row.is_refund === 1,
         categoryIsFee: row.is_fee === 1,
         categoryIsCashWithdrawal: row.is_cash_withdrawal === 1,
