@@ -59,6 +59,14 @@ const EXPECTED_METRICS = {
     value: 79_000,
     reason: "The final daily cumulative movement equals net cash flow.",
   },
+  "cashflow.by_day": {
+    value: 79_000,
+    reason: "Daily signed movements sum to the same 79,000 net cash flow.",
+  },
+  "cashflow.by_account": {
+    value: 79_000,
+    reason: "Signed movement grouped by account preserves the overall net cash flow.",
+  },
   "cashflow.transaction_count": {
     value: 16,
     reason: "Eighteen NGN transactions less the two sides of the owned transfer.",
@@ -75,6 +83,7 @@ const EXPECTED_METRICS = {
     reason: "Three 2,000 subscription debits occur seven days apart.",
   },
   "spending.by_weekday": { value: 166_000, reason: "All spending grouped by local weekday." },
+  "spending.by_day": { value: 166_000, reason: "All spending grouped by local calendar day." },
   "spending.concentration": {
     value: 9_036,
     reason: "The top three counterparties contribute 150,000 of 166,000 spending.",
@@ -82,6 +91,10 @@ const EXPECTED_METRICS = {
   "spending.unusual": {
     value: 130_000,
     reason: "The 30,000 grocery and 100,000 shopping rows exceed the fixture's Tukey fence.",
+  },
+  "spending.variable": {
+    value: 160_000,
+    reason: "Total spending less the three detected recurring subscription payments.",
   },
   "income.by_source": {
     value: 230_000,
@@ -92,6 +105,7 @@ const EXPECTED_METRICS = {
     reason: "Three 10,000 client credits occur seven days apart.",
   },
   "income.by_weekday": { value: 230_000, reason: "Classified income grouped by local weekday." },
+  "income.by_day": { value: 230_000, reason: "Classified income grouped by local calendar day." },
   "income.concentration": {
     value: 10_000,
     reason: "The only two income sources account for all income.",
@@ -99,6 +113,10 @@ const EXPECTED_METRICS = {
   "income.variability": {
     value: 0,
     reason: "The fixture has one active income month, so monthly variation is zero.",
+  },
+  "income.irregular": {
+    value: 200_000,
+    reason: "Salary remains after excluding the three detected recurring client payments.",
   },
   "savings.estimated_rate": {
     value: 2_783,
@@ -120,6 +138,18 @@ const EXPECTED_METRICS = {
     value: 18,
     reason: "All distinct NGN transactions, including transfer and adjustment activity.",
   },
+  "behaviour.activity_by_day": {
+    value: 18,
+    reason: "All distinct NGN transactions are grouped by local calendar day.",
+  },
+  "behaviour.average_daily_activity": {
+    value: 0.6,
+    reason: "Eighteen distinct transactions across the thirty selected calendar days.",
+  },
+  "behaviour.account_usage": {
+    value: 18,
+    reason: "All distinct NGN transactions are grouped by their source account.",
+  },
   "behaviour.weekend_share": {
     value: 1_111,
     reason: "Two of eighteen NGN transactions occur on Saturday or Sunday.",
@@ -127,6 +157,14 @@ const EXPECTED_METRICS = {
   "behaviour.change": {
     value: 166_000,
     reason: "Current spending is compared with the prior period.",
+  },
+  "behaviour.expense_income_ratio": {
+    value: 7_217,
+    reason: "166,000 classified spending is 72.17% of 230,000 confirmed income.",
+  },
+  "behaviour.savings_transfers": {
+    value: 0,
+    reason: "The fixture has no transactions assigned to a savings category.",
   },
   "quality.classification_coverage": {
     value: 9_444,
@@ -223,8 +261,8 @@ afterEach(() => sqlite.close());
 
 describe("analytics metric registry", () => {
   it("registers every public metric exactly once with calculation metadata", () => {
-    expect(analyticsMetricRegistry).toHaveLength(44);
-    expect(new Set(analyticsMetricRegistry.map(({ id }) => id)).size).toBe(44);
+    expect(analyticsMetricRegistry).toHaveLength(55);
+    expect(new Set(analyticsMetricRegistry.map(({ id }) => id)).size).toBe(55);
     for (const item of analyticsMetricRegistry) {
       expect(item.title).not.toBe("");
       expect(item.definition).not.toBe("");
@@ -239,7 +277,7 @@ describe("traceable financial calculations", () => {
   it("matches the manually documented fixture for every registered metric", () => {
     const result = engine.query(WORKSPACE_ID, query());
 
-    expect(result.metrics).toHaveLength(44);
+    expect(result.metrics).toHaveLength(55);
     for (const metric of result.metrics) {
       const expected = EXPECTED_METRICS[metric.id];
       if (metric.id === "cashflow.inflow_outflow_ratio") {

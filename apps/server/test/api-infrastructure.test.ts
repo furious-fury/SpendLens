@@ -131,7 +131,7 @@ describe("OpenAPI and structured API behavior", () => {
     const metrics = AnalyticsResultSchema.parse(await metricsResponse.json());
 
     expect(registryResponse.status).toBe(200);
-    expect(registry.items).toHaveLength(44);
+    expect(registry.items).toHaveLength(55);
     expect(metricsResponse.status).toBe(200);
     expect(metrics.metrics).toMatchObject([
       { id: "cashflow.net", status: "available", value: 0, transactionIds: [] },
