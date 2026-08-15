@@ -62,22 +62,14 @@ export class PalmPayStatementParser implements BankStatementParser {
     const statementEnd = isoDate(endYear, endMonth, endDay);
     const accountNumber = optionalHeaderValue(firstPage, "Account Number");
 
-    const transactions = document.pages.flatMap((page) => parsePageRows(page));
+    const transactions = deduplicateExactTransactions(
+      document.pages.flatMap((page) => parsePageRows(page)),
+    );
     if (transactions.length === 0) {
       throw new StatementParserError(
         "PALMPAY_ROW_INVALID",
         "No PalmPay transaction rows were found.",
       );
-    }
-    const ids = new Set<string>();
-    for (const transaction of transactions) {
-      if (ids.has(transaction.sourceTransactionId)) {
-        throw new StatementParserError(
-          "PALMPAY_DUPLICATE_TRANSACTION_ID",
-          "The statement contains a repeated PalmPay transaction ID.",
-        );
-      }
-      ids.add(transaction.sourceTransactionId);
     }
 
     const parsedInflowMinor = sumDirection(transactions, "credit");
@@ -111,9 +103,28 @@ export class PalmPayStatementParser implements BankStatementParser {
   }
 }
 
+type ParsedTransaction = Omit<NormalizedStatementTransaction, "sourceRowIndex">;
+
+function deduplicateExactTransactions(transactions: ParsedTransaction[]): ParsedTransaction[] {
+  const seen = new Set<string>();
+  return transactions.filter((transaction) => {
+    const identity = JSON.stringify([
+      transaction.sourceTransactionId,
+      transaction.sourceTimestamp,
+      transaction.direction,
+      transaction.amountMinor,
+      transaction.currency,
+      transaction.narration,
+    ]);
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
 function parsePageRows(
   page: PositionedPdfPage,
-): Omit<NormalizedStatementTransaction, "sourceRowIndex">[] {
+): ParsedTransaction[] {
   const anchors = page.items
     .filter((item) => item.x < 125 && DATE_TIME_PATTERN.test(item.text.trim()))
     .sort((left, right) => right.y - left.y);

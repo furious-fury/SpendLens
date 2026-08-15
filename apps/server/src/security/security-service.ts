@@ -176,6 +176,12 @@ export class SecurityService {
       if (!service.#workspace()?.setupCompletedAt) {
         await service.#setupToken.ensure();
       }
+      const existingWorkspaces = service.#database.sqlite
+        .prepare("SELECT id FROM workspaces")
+        .all() as Array<{ id: string }>;
+      for (const workspace of existingWorkspaces) {
+        seedStarterTaxonomy(service.#database.sqlite, workspace.id);
+      }
     } else {
       await service.#setupToken.ensure();
     }

@@ -1,6 +1,7 @@
 import { Check } from "@phosphor-icons/react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import type * as React from "react";
+import { overlayLayers } from "@/components/ui/layers";
 import { cn } from "@/lib/utils";
 
 const DropdownMenu = DropdownMenuPrimitive.Root;
@@ -10,16 +11,18 @@ const DropdownMenuPortal = DropdownMenuPrimitive.Portal;
 function DropdownMenuContent({
   className,
   sideOffset = 8,
+  style,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
   return (
     <DropdownMenuPortal>
       <DropdownMenuPrimitive.Content
         className={cn(
-          "z-50 min-w-44 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg",
+          "min-w-44 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg",
           className,
         )}
         sideOffset={sideOffset}
+        style={{ zIndex: overlayLayers.floating, ...style }}
         {...props}
       />
     </DropdownMenuPortal>

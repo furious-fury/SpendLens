@@ -163,15 +163,7 @@ export function RulesPage() {
 
   return (
     <div className="space-y-5">
-      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <p className="text-sm text-muted-foreground">Classification memory</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Rules</h1>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Inspect exactly why SpendLens classifies known activity. Priority wins first, then
-            specificity; equally ranked disagreements are sent to Review.
-          </p>
-        </div>
+      <header className="flex justify-end">
         <Button onClick={create}>
           <Plus />
           New rule

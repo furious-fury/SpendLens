@@ -56,6 +56,44 @@ describe("PalmPay coordinate parser", () => {
     });
   });
 
+  it("retains distinct transactions when PalmPay reuses a transaction ID", async () => {
+    const repeatedId = "palmpay-reused-001";
+    const path = await fixturePath(
+      await createSanitizedPalmPayPdf({
+        creditTransactionId: repeatedId,
+        debitTransactionId: repeatedId,
+      }),
+    );
+    const document = await readPositionedPdf(path);
+
+    const statement = new PalmPayStatementParser().parse(document);
+
+    expect(statement.transactions).toHaveLength(2);
+    expect(statement.transactions.map((row) => row.sourceTransactionId)).toEqual([
+      repeatedId,
+      repeatedId,
+    ]);
+    expect(statement.reconciliation).toMatchObject({
+      status: "matched",
+      parsedInflowMinor: 100_000,
+      parsedOutflowMinor: 25_050,
+    });
+  });
+
+  it("collapses an exact repeated PDF row before preview", async () => {
+    const path = await fixturePath(await createSanitizedPalmPayPdf({ repeatFirstRow: true }));
+    const document = await readPositionedPdf(path);
+
+    const statement = new PalmPayStatementParser().parse(document);
+
+    expect(statement.transactions).toHaveLength(1);
+    expect(statement.reconciliation).toMatchObject({
+      status: "matched",
+      parsedInflowMinor: 100_000,
+      parsedOutflowMinor: 0,
+    });
+  });
+
   it("identifies scanned, unsupported, malformed, encrypted, and overlong PDFs", async () => {
     const scannedPath = await fixturePath(await createSanitizedPalmPayPdf({ includeText: false }));
     const scanned = await readPositionedPdf(scannedPath);

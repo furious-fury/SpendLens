@@ -91,6 +91,28 @@ describe("classification rules", () => {
     fixture.sqlite.close();
   });
 
+  it("classifies Bolt debit narrations as ride hailing", () => {
+    const fixture = databaseFixture();
+    const transactionId = insertTransaction(fixture.sqlite, "BOLT TRIP 8472");
+    const engine = new ClassificationEngine(fixture.sqlite, () => 100);
+    const rideHailing = starterCategoryId(WORKSPACE_ID, "ride-hailing");
+
+    expect(engine.evaluateTransaction(WORKSPACE_ID, transactionId)).toMatchObject({
+      source: "bank",
+      confidence: "medium",
+      suggestion: { categoryId: rideHailing, transactionType: "expense" },
+      evidence: [expect.objectContaining({ code: "transport.ride_hailing", source: "bank" })],
+    });
+
+    engine.classifyTransactions(WORKSPACE_ID, [transactionId]);
+    expect(transaction(fixture.sqlite, transactionId)).toMatchObject({
+      category_id: rideHailing,
+      transaction_type: "expense",
+      classification_source: "deterministic",
+    });
+    fixture.sqlite.close();
+  });
+
   it.each([
     {
       name: "equals",

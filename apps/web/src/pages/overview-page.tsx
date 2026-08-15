@@ -130,6 +130,7 @@ export function OverviewPage() {
       <DashboardFilters
         accounts={accounts}
         value={filters}
+        showRangePresets
         onChange={setFilters}
         disabled={analyticsQuery.isPending}
       />

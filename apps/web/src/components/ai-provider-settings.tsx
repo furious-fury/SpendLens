@@ -306,6 +306,11 @@ function ProviderEditor({
     form.model.trim() &&
     Number(form.timeoutMs) >= 1 &&
     (!form.enabled || form.localModel || form.acknowledgeRemotePayload);
+  const modelOptions = getModelOptions(form.model, modelsQuery.data?.items ?? []);
+  const hasListedModels = Boolean(
+    modelsQuery.data?.listingSupported && modelsQuery.data.items.length > 0,
+  );
+  const enableGuidance = getProviderEnableGuidance(form);
 
   function chooseProvider(provider: AiProviderKind) {
     const defaults = providerDefaults[provider];
@@ -369,19 +374,36 @@ function ProviderEditor({
             </Field>
           </div>
           <Field label="Model">
-            <Input
-              list="available-ai-models"
-              value={form.model}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, model: event.target.value }))
-              }
-              required
-            />
-            <datalist id="available-ai-models">
-              {(modelsQuery.data?.items ?? []).map((model) => (
-                <option key={model} value={model} />
-              ))}
-            </datalist>
+            {hasListedModels ? (
+              <Select
+                aria-label="Model"
+                value={form.model}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, model: event.target.value }))
+                }
+                required
+              >
+                {modelOptions.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Input
+                aria-label="Model"
+                value={form.model}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, model: event.target.value }))
+                }
+                required
+              />
+            )}
+            {hasListedModels && (
+              <span className="block text-xs text-success">
+                {modelOptions.length} available models loaded.
+              </span>
+            )}
           </Field>
           <Field label="Timeout (seconds)">
             <Input
@@ -424,7 +446,11 @@ function ProviderEditor({
             onClick={() => modelsQuery.refetch()}
           >
             <Plug />
-            {modelsQuery.isFetching ? "Loading models…" : "List models"}
+            {modelsQuery.isFetching
+              ? "Loading models…"
+              : hasListedModels
+                ? "Refresh models"
+                : "List models"}
           </Button>
         )}
 
@@ -467,6 +493,7 @@ function ProviderEditor({
             </pre>
             <div className="flex items-start gap-3">
               <Checkbox
+                id="acknowledge-remote-payload"
                 aria-label="Acknowledge remote payload policy"
                 checked={form.acknowledgeRemotePayload}
                 onCheckedChange={(checked) =>
@@ -477,28 +504,40 @@ function ProviderEditor({
                 }
                 className="mt-0.5"
               />
-              <span className="text-xs leading-5">
+              <Label
+                htmlFor="acknowledge-remote-payload"
+                className="cursor-pointer text-xs font-normal leading-5"
+              >
                 I reviewed what will be sent to this remote provider.
-              </span>
+              </Label>
             </div>
           </div>
         )}
 
-        <div className="flex items-start gap-3 rounded-xl border p-4">
+        <div
+          className={`flex items-start gap-3 rounded-xl border p-4 ${enableGuidance.blocked ? "border-attention/30 bg-attention/5" : ""}`}
+        >
           <Checkbox
+            id="enable-ai-provider"
             aria-label="Enable provider"
             checked={form.enabled}
+            disabled={enableGuidance.blocked}
             onCheckedChange={(checked) =>
               setForm((current) => ({ ...current, enabled: checked === true }))
             }
             className="mt-0.5"
           />
-          <span>
+          <Label
+            htmlFor="enable-ai-provider"
+            className={enableGuidance.blocked ? "cursor-not-allowed" : "cursor-pointer"}
+          >
             <span className="block text-sm font-medium">Enable provider</span>
-            <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-              Enabling never sends data automatically. You choose transactions from Review.
+            <span
+              className={`mt-1 block text-xs leading-5 ${enableGuidance.blocked ? "text-attention" : "text-muted-foreground"}`}
+            >
+              {enableGuidance.message}
             </span>
-          </span>
+          </Label>
         </div>
 
         {mutation.error && <SettingsError error={mutation.error} />}
@@ -529,6 +568,32 @@ function initialForm(provider: AiProviderKind): FormState {
     localModel: defaults.local,
     apiKey: "",
     acknowledgeRemotePayload: defaults.local,
+  };
+}
+
+export function getModelOptions(currentModel: string, listedModels: string[]) {
+  return [...new Set([currentModel.trim(), ...listedModels.map((model) => model.trim())])]
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+export function getProviderEnableGuidance({
+  enabled,
+  localModel,
+  acknowledgeRemotePayload,
+}: Pick<FormState, "enabled" | "localModel" | "acknowledgeRemotePayload">) {
+  if (!localModel && !acknowledgeRemotePayload) {
+    return {
+      blocked: true,
+      message: "Review and confirm the redacted payload above to unlock this provider.",
+    };
+  }
+
+  return {
+    blocked: false,
+    message: enabled
+      ? "Enabled. Transactions are only sent when you choose them from Review."
+      : "Ready to enable. Transactions are only sent when you choose them from Review.",
   };
 }
 

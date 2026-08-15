@@ -34,6 +34,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -534,17 +535,19 @@ function TransactionFilters({
     <div className="mt-4 border-t border-border pt-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <FilterField label="From">
-          <Input
-            type="date"
+          <DatePicker
             value={search.start ?? ""}
-            onChange={(event) => onChange({ start: event.target.value || undefined })}
+            max={search.end}
+            onChange={(start) => onChange({ start: start || undefined })}
+            aria-label="Transaction start date"
           />
         </FilterField>
         <FilterField label="To">
-          <Input
-            type="date"
+          <DatePicker
             value={search.end ?? ""}
-            onChange={(event) => onChange({ end: event.target.value || undefined })}
+            min={search.start}
+            onChange={(end) => onChange({ end: end || undefined })}
+            aria-label="Transaction end date"
           />
         </FilterField>
         <FilterField label="Account">

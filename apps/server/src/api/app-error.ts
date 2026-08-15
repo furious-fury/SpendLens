@@ -67,6 +67,8 @@ export const errorFamilies = {
     "PALMPAY_HEADER_INVALID",
     "PALMPAY_ROW_INVALID",
     "PALMPAY_DUPLICATE_TRANSACTION_ID",
+    "OPAY_HEADER_INVALID",
+    "OPAY_ROW_INVALID",
   ],
   duplicate: [
     "DUPLICATE_IMPORT",

@@ -181,6 +181,19 @@ const classificationJobRoute = createRoute({
   },
 });
 
+const activeClassificationJobRoute = createRoute({
+  method: "get",
+  path: "/api/ai/classification-jobs/active",
+  tags: ["AI"],
+  responses: {
+    200: {
+      content: { "application/json": { schema: JobSchema.nullable() } },
+      description: "Current queued or running AI classification job",
+    },
+    401: errorResponse,
+  },
+});
+
 export function createAiRoutes(options: AiRoutesOptions) {
   const app = new OpenAPIHono<AppEnv>();
 
@@ -191,6 +204,12 @@ export function createAiRoutes(options: AiRoutesOptions) {
       { items, providersDisabled: items.every((provider) => !provider.enabled) },
       200,
     );
+  });
+
+  app.openapi(activeClassificationJobRoute, (context) => {
+    const session = context.get("session");
+    const job = options.jobs.getActive(session.workspaceId, AI_CLASSIFICATION_JOB_TYPE);
+    return context.json(job ? jobResponse(job) : null, 200);
   });
 
   app.openapi(createProviderRoute, async (context) => {
@@ -328,7 +347,7 @@ export function createAiRoutes(options: AiRoutesOptions) {
         ),
       );
     }
-    const job = options.jobs.enqueue({
+    const job = options.jobs.enqueueExclusive({
       workspaceId: session.workspaceId,
       jobType: AI_CLASSIFICATION_JOB_TYPE,
       idempotencyKey: randomUUID(),

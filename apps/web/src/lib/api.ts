@@ -31,6 +31,10 @@ import {
   type CreateClassificationRule,
   type CreateCounterparty,
   JobSchema,
+  type ImportDeduplicationSummary,
+  ImportDeduplicationSummarySchema,
+  type ImportPreview,
+  ImportPreviewSchema,
   RekeyResponseSchema,
   type ReplaceTransactionSplits,
   ReviewDecisionResultSchema,
@@ -73,7 +77,7 @@ async function request<T>(
 ): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("accept", "application/json");
-  if (init.body !== undefined) {
+  if (init.body !== undefined && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
   if (init.method && !["GET", "HEAD"].includes(init.method.toUpperCase())) {
@@ -244,6 +248,50 @@ export const api = {
   createAccount(input: CreateAccount) {
     return mutate(apiPaths.accounts, input, (value) => AccountSchema.parse(value));
   },
+  createImportPreview(file: File): Promise<ImportPreview> {
+    return request(apiPaths.importPreviews, (value) => ImportPreviewSchema.parse(value), {
+      method: "POST",
+      body: file,
+      headers: {
+        "content-type": "application/pdf",
+        "x-spendlens-filename": file.name,
+      },
+    });
+  },
+  importPreview(importId: string): Promise<ImportPreview> {
+    return request(apiPaths.importPreview(importId), (value) => ImportPreviewSchema.parse(value));
+  },
+  analyzeImport(importId: string, accountId?: string): Promise<ImportDeduplicationSummary> {
+    return mutate(
+      apiPaths.analyzeImport(importId),
+      accountId ? { accountId } : {},
+      (value) => ImportDeduplicationSummarySchema.parse(value),
+    );
+  },
+  importReconciliation(importId: string): Promise<ImportDeduplicationSummary> {
+    return request(apiPaths.analyzeImport(importId), (value) =>
+      ImportDeduplicationSummarySchema.parse(value),
+    );
+  },
+  decideImport(
+    importId: string,
+    decisions: Array<{
+      decisionId: string;
+      action: "confirm_duplicate" | "keep_separate" | "skip";
+    }>,
+  ): Promise<ImportDeduplicationSummary> {
+    return mutate(apiPaths.importDecisions(importId), { decisions }, (value) =>
+      ImportDeduplicationSummarySchema.parse(value),
+    );
+  },
+  commitImport(
+    importId: string,
+    confirmUnreconciled: boolean,
+  ): Promise<ImportDeduplicationSummary> {
+    return mutate(apiPaths.commitImport(importId), { confirmUnreconciled }, (value) =>
+      ImportDeduplicationSummarySchema.parse(value),
+    );
+  },
   updateAccount(accountId: string, input: UpdateAccount) {
     return mutate(
       apiPaths.account(accountId),
@@ -382,6 +430,9 @@ export const api = {
   },
   startAiClassification(input: AiClassificationJobRequest) {
     return mutate(apiPaths.aiClassificationJobs, input, (value) => JobSchema.parse(value));
+  },
+  activeAiClassificationJob() {
+    return request(apiPaths.activeAiClassificationJob, (value) => JobSchema.nullable().parse(value));
   },
   analyticsRegistry() {
     return request(apiPaths.analyticsRegistry, (value) => AnalyticsRegistrySchema.parse(value));

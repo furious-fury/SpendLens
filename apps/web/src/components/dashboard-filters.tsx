@@ -6,8 +6,9 @@ import {
   Wallet,
 } from "@phosphor-icons/react";
 import type { Account, AnalyticsComparisonQuery, TransactionScope } from "@spendlens/contracts";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -16,7 +17,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -34,6 +34,7 @@ interface DashboardFiltersProps {
   accounts: Account[];
   value: DashboardFiltersValue;
   onChange: (value: DashboardFiltersValue) => void;
+  showRangePresets?: boolean;
   disabled?: boolean;
   className?: string;
 }
@@ -42,9 +43,11 @@ export function DashboardFilters({
   accounts,
   value,
   onChange,
+  showRangePresets = false,
   disabled,
   className,
 }: DashboardFiltersProps) {
+  const [customRangeOpen, setCustomRangeOpen] = useState(false);
   const selectedAccounts = accounts.filter((account) => value.accountIds.includes(account.id));
   const accountLabel =
     selectedAccounts.length === accounts.length
@@ -53,6 +56,11 @@ export function DashboardFilters({
         ? selectedAccounts[0]?.displayName
         : `${selectedAccounts.length} accounts`;
   const comparisonMode = value.comparison.mode;
+  const selectedRange = showRangePresets
+    ? customRangeOpen
+      ? "custom"
+      : rangePresetFor(value.startDate, value.endDate)
+    : "custom";
 
   function update(changes: Partial<DashboardFiltersValue>) {
     onChange({ ...value, ...changes });
@@ -73,36 +81,51 @@ export function DashboardFilters({
 
   return (
     <section
-      className={cn("rounded-xl border border-border bg-card p-3 md:p-4", className)}
+      className={cn(
+        "rounded-xl border border-border bg-card p-3 shadow-[var(--shadow-card)]",
+        className,
+      )}
       aria-label="Dashboard filters"
     >
       <div className="mb-3 flex items-center gap-2 text-sm font-medium md:hidden">
         <FunnelSimple className="size-4 text-primary" />
         Dashboard filters
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(250px,1.2fr)_minmax(180px,.85fr)_120px_140px_minmax(190px,.9fr)]">
-        <fieldset className="grid grid-cols-2 gap-2" disabled={disabled}>
-          <legend className="sr-only">Date range</legend>
-          <FilterField label="From" icon={<CalendarBlank />}>
-            <Input
-              type="date"
-              value={value.startDate}
-              max={value.endDate}
-              onChange={(event) => update({ startDate: event.target.value })}
-              aria-label="Dashboard start date"
-            />
+      <div
+        className={cn(
+          "grid gap-2.5 sm:grid-cols-2",
+          showRangePresets
+            ? cn(
+                "xl:grid-cols-[150px_minmax(250px,1.2fr)_minmax(180px,.85fr)_130px_minmax(180px,.9fr)]",
+              )
+            : "xl:grid-cols-[minmax(250px,1.2fr)_minmax(180px,.85fr)_110px_130px_minmax(180px,.9fr)]",
+        )}
+      >
+        {showRangePresets ? (
+          <FilterField label="Range" icon={<CalendarBlank />}>
+            <Select
+              value={selectedRange}
+              disabled={disabled}
+              onChange={(event) => {
+                const preset = event.target.value as DateRangePreset;
+                if (preset === "custom") {
+                  setCustomRangeOpen(true);
+                  return;
+                }
+                setCustomRangeOpen(false);
+                update(dateRangeForPreset(preset, value.endDate));
+              }}
+              aria-label="Dashboard date range preset"
+            >
+              <option value="one_month">1 month</option>
+              <option value="three_months">3 months</option>
+              <option value="year_to_date">Year to date</option>
+              <option value="one_year">1 year</option>
+              <option value="all_time">All time</option>
+              <option value="custom">Custom range</option>
+            </Select>
           </FilterField>
-          <FilterField label="To">
-            <Input
-              type="date"
-              value={value.endDate}
-              min={value.startDate}
-              onChange={(event) => update({ endDate: event.target.value })}
-              aria-label="Dashboard end date"
-            />
-          </FilterField>
-        </fieldset>
-
+        ) : null}
         <FilterField label="Accounts" icon={<Wallet />}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -205,20 +228,46 @@ export function DashboardFilters({
         </FilterField>
       </div>
 
+      {selectedRange === "custom" ? (
+        <fieldset className="mt-3 grid max-w-xl grid-cols-2 gap-2 border-t border-border pt-3" disabled={disabled}>
+          <legend className="sr-only">Date range</legend>
+          <FilterField label="From" icon={<CalendarBlank />}>
+            <DatePicker
+              value={value.startDate}
+              max={value.endDate}
+              disabled={disabled}
+              clearable={false}
+              onChange={(startDate) => update({ startDate })}
+              aria-label="Dashboard start date"
+            />
+          </FilterField>
+          <FilterField label="To">
+            <DatePicker
+              value={value.endDate}
+              min={value.startDate}
+              disabled={disabled}
+              clearable={false}
+              onChange={(endDate) => update({ endDate })}
+              aria-label="Dashboard end date"
+            />
+          </FilterField>
+        </fieldset>
+      ) : null}
+
       {value.comparison.mode === "custom" && (
         <div className="mt-3 grid gap-2 border-t border-border pt-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
           <FilterField label="Comparison from">
-            <Input
-              type="date"
+            <DatePicker
               value={value.comparison.startDate}
               max={value.comparison.endDate}
               disabled={disabled}
-              onChange={(event) => {
+              clearable={false}
+              onChange={(startDate) => {
                 if (value.comparison.mode !== "custom") return;
                 update({
                   comparison: {
                     mode: "custom",
-                    startDate: event.target.value,
+                    startDate,
                     endDate: value.comparison.endDate,
                   },
                 });
@@ -226,18 +275,18 @@ export function DashboardFilters({
             />
           </FilterField>
           <FilterField label="Comparison to">
-            <Input
-              type="date"
+            <DatePicker
               value={value.comparison.endDate}
               min={value.comparison.startDate}
               disabled={disabled}
-              onChange={(event) => {
+              clearable={false}
+              onChange={(endDate) => {
                 if (value.comparison.mode !== "custom") return;
                 update({
                   comparison: {
                     mode: "custom",
                     startDate: value.comparison.startDate,
-                    endDate: event.target.value,
+                    endDate,
                   },
                 });
               }}
@@ -287,6 +336,34 @@ export function datesForLatestTransaction(occurredAt: string): {
   endDate: string;
 } {
   return initialDashboardDates(new Date(occurredAt));
+}
+
+type DateRangePreset = "one_month" | "three_months" | "year_to_date" | "one_year" | "all_time";
+
+function dateRangeForPreset(
+  preset: DateRangePreset,
+  endDate: string,
+): { startDate: string; endDate: string } {
+  const end = new Date(`${endDate}T00:00:00`);
+  const year = end.getFullYear();
+  const month = end.getMonth();
+  const start =
+    preset === "one_month"
+      ? new Date(year, month, 1)
+      : preset === "three_months"
+        ? new Date(year, month - 2, 1)
+        : preset === "year_to_date"
+          ? new Date(year, 0, 1)
+          : preset === "one_year"
+            ? new Date(year, month - 11, 1)
+            : new Date(1970, 0, 1);
+  return { startDate: localIsoDate(start), endDate };
+}
+
+function rangePresetFor(startDate: string, endDate: string): DateRangePreset | "custom" {
+  return (["one_month", "three_months", "year_to_date", "one_year", "all_time"] as const).find(
+    (preset) => dateRangeForPreset(preset, endDate).startDate === startDate,
+  ) ?? "custom";
 }
 
 export function previousPeriod(

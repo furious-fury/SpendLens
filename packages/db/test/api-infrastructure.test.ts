@@ -87,6 +87,41 @@ describe("SQLite job queue", () => {
     fixture.close();
   });
 
+  it("recovers the active job after a client refresh and prevents a duplicate run", async () => {
+    const fixture = await createFixture();
+    const queue = new JobQueue(fixture.sqlite, () => 1_000);
+    const first = queue.enqueueExclusive({
+      workspaceId: "workspace",
+      jobType: "classification.ai",
+      idempotencyKey: "first-request",
+      payload: { transactionIds: ["transaction-1"] },
+    });
+
+    const recovered = new JobQueue(fixture.sqlite, () => 1_001).getActive(
+      "workspace",
+      "classification.ai",
+    );
+    const duplicate = queue.enqueueExclusive({
+      workspaceId: "workspace",
+      jobType: "classification.ai",
+      idempotencyKey: "second-request",
+      payload: { transactionIds: ["transaction-1"] },
+    });
+
+    expect(recovered?.id).toBe(first.id);
+    expect(duplicate.id).toBe(first.id);
+
+    queue.cancel("workspace", first.id);
+    const next = queue.enqueueExclusive({
+      workspaceId: "workspace",
+      jobType: "classification.ai",
+      idempotencyKey: "third-request",
+      payload: { transactionIds: ["transaction-1"] },
+    });
+    expect(next.id).not.toBe(first.id);
+    fixture.close();
+  });
+
   it("recovers abandoned leases for retry and safely fails exhausted jobs", async () => {
     const fixture = await createFixture();
     let now = 10_000;

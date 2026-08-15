@@ -7,9 +7,10 @@ import {
   Info,
   MagicWand,
   PencilSimple,
+  Plus,
   Sparkle,
-  StopCircle,
   Warning,
+  X,
 } from "@phosphor-icons/react";
 import type {
   ApplyReviewDecision,
@@ -55,6 +56,10 @@ export function ReviewPage() {
   const [undoAction, setUndoAction] = useState<{ id: string; count: number } | null>(null);
   const [aiEditorOpen, setAiEditorOpen] = useState(false);
   const [aiJobId, setAiJobId] = useState<string | null>(null);
+  const activeAiJobQuery = useQuery({
+    queryKey: ["active-ai-classification-job"],
+    queryFn: api.activeAiClassificationJob,
+  });
   const aiJobQuery = useQuery({
     queryKey: ["job", aiJobId],
     queryFn: () => api.job(aiJobId as string),
@@ -64,6 +69,10 @@ export function ReviewPage() {
         ? false
         : 1_000,
   });
+
+  useEffect(() => {
+    if (!aiJobId && activeAiJobQuery.data) setAiJobId(activeAiJobQuery.data.id);
+  }, [activeAiJobQuery.data, aiJobId]);
 
   const refresh = async () => {
     await Promise.all([
@@ -81,6 +90,7 @@ export function ReviewPage() {
         rememberForFuture: false,
       }),
     onSuccess: async (result) => {
+      setSelected({});
       setUndoAction({ id: result.actionId, count: result.affectedCount });
       await refresh();
     },
@@ -98,11 +108,27 @@ export function ReviewPage() {
   });
 
   useEffect(() => {
-    if (aiJobQuery.data?.status !== "succeeded") return;
-    void queryClient.invalidateQueries({ queryKey: ["classification-review"] });
-  }, [aiJobQuery.data?.status, queryClient]);
+    const job = aiJobQuery.data;
+    if (!job || !["succeeded", "failed", "cancelled"].includes(job.status)) return;
+    if (job.status === "succeeded") {
+      void queryClient.invalidateQueries({ queryKey: ["classification-review"] });
+    }
+    void queryClient
+      .fetchQuery({
+        queryKey: ["active-ai-classification-job"],
+        queryFn: api.activeAiClassificationJob,
+      })
+      .then((nextJob) => {
+        if (nextJob && nextJob.id !== job.id) setAiJobId(nextJob.id);
+      });
+  }, [aiJobQuery.data, queryClient]);
 
-  const groups = groupsQuery.data?.items ?? [];
+  const groups = useMemo(() => {
+    const items = groupsQuery.data?.items ?? [];
+    return [...items].sort(
+      (left, right) => Number(isAiReviewGroup(right)) - Number(isAiReviewGroup(left)),
+    );
+  }, [groupsQuery.data?.items]);
   const total = groupsQuery.data?.totalTransactions ?? 0;
   const enabledProviders = useMemo(
     () => providersQuery.data?.items.filter(({ enabled }) => enabled) ?? [],
@@ -111,6 +137,10 @@ export function ReviewPage() {
   const aiTransactionIds = useMemo(
     () => selectedTransactionIds(groups, selected),
     [groups, selected],
+  );
+  const activeAiJob = aiJobQuery.data ?? activeAiJobQuery.data;
+  const aiRunInProgress = Boolean(
+    activeAiJob && ["queued", "running"].includes(activeAiJob.status),
   );
 
   function toggleExpanded(key: string) {
@@ -133,27 +163,21 @@ export function ReviewPage() {
 
   return (
     <div className="space-y-5">
-      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <p className="text-sm text-muted-foreground">Classification quality</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Review uncertain activity</h1>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Similar transactions are grouped so one clear decision can fix selected activity,
-            current matches, or future matches.
-          </p>
-        </div>
+      <header className="flex justify-end">
         <div className="flex flex-wrap items-end gap-3">
           <Button
             variant="outline"
             disabled={
-              total === 0 || !providersQuery.data?.items.some((provider) => provider.enabled)
+              aiRunInProgress ||
+              total === 0 ||
+              !providersQuery.data?.items.some((provider) => provider.enabled)
             }
             onClick={() => setAiEditorOpen(true)}
           >
             <Brain />
-            Suggest with AI
+            {aiRunInProgress ? "AI run in progress" : "Suggest with AI"}
           </Button>
-          <div className="rounded-xl border bg-muted/30 px-4 py-3">
+          <div className="rounded-xl border bg-card px-4 py-3 shadow-[var(--shadow-card)]">
             <p className="font-tabular text-2xl font-semibold">{total}</p>
             <p className="text-xs text-muted-foreground">transactions need attention</p>
           </div>
@@ -183,12 +207,12 @@ export function ReviewPage() {
             </div>
             {["queued", "running"].includes(aiJobQuery.data.status) && (
               <Button
-                variant="outline"
+                variant="destructive"
                 disabled={cancelAiMutation.isPending}
                 onClick={() => cancelAiMutation.mutate(aiJobQuery.data.id)}
               >
-                <StopCircle />
-                Cancel
+                <X weight="bold" />
+                {cancelAiMutation.isPending ? "Stopping…" : "Stop AI run"}
               </Button>
             )}
           </div>
@@ -238,6 +262,7 @@ export function ReviewPage() {
           {groups.map((group) => {
             const isExpanded = expanded.has(group.key);
             const selectedIds = [...(selected[group.key] ?? new Set<string>())];
+            const narrationSamples = reviewNarrationSamples(group);
             return (
               <Card key={group.key} className={cn(group.hasConflict && "border-attention/40")}>
                 <CardHeader className="gap-3">
@@ -250,6 +275,11 @@ export function ReviewPage() {
                           <Sparkle className="size-5 text-primary" />
                         )}
                         <CardTitle className="truncate">{group.label}</CardTitle>
+                        {isAiReviewGroup(group) ? (
+                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                            AI suggestion
+                          </span>
+                        ) : null}
                         <ConfidenceBadge confidence={group.confidence} />
                         <span className="rounded-full border px-2 py-0.5 text-[11px] capitalize text-muted-foreground">
                           {group.basis}
@@ -260,6 +290,12 @@ export function ReviewPage() {
                         {group.transactionCount === 1 ? "transaction" : "transactions"} ·{" "}
                         {group.totals.map(formatGroupTotal).join(" · ")}
                       </CardDescription>
+                      {narrationSamples.length > 0 ? (
+                        <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                          <span className="font-medium text-foreground/75">Statement descriptions:</span>{" "}
+                          {narrationSamples.join(" · ")}
+                        </p>
+                      ) : null}
                     </div>
                     <Button variant="ghost" onClick={() => toggleExpanded(group.key)}>
                       {isExpanded ? <CaretUp /> : <CaretDown />}
@@ -298,6 +334,15 @@ export function ReviewPage() {
                           />
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-medium">{transaction.narration}</p>
+                            {transaction.rawNarration &&
+                            transaction.rawNarration !== transaction.narration ? (
+                              <p
+                                className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground"
+                                title={transaction.rawNarration}
+                              >
+                                Bank description: {transaction.rawNarration}
+                              </p>
+                            ) : null}
                             <p className="mt-1 text-xs text-muted-foreground">
                               {new Date(transaction.occurredAt).toLocaleDateString("en-NG")} ·{" "}
                               {transaction.accountName}
@@ -368,6 +413,7 @@ export function ReviewPage() {
         onClose={() => setEditor(null)}
         onApplied={async (actionId, count) => {
           setEditor(null);
+          setSelected({});
           setUndoAction({ id: actionId, count });
           await refresh();
         }}
@@ -481,7 +527,11 @@ function DecisionEditor({
   const [remember, setRemember] = useState(true);
   const [ruleName, setRuleName] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
   const [counterpartyId, setCounterpartyId] = useState("");
+  const [creatingCounterparty, setCreatingCounterparty] = useState(false);
+  const [newCounterpartyName, setNewCounterpartyName] = useState("");
   const [transactionType, setTransactionType] = useState<"" | TransactionType>("");
   const [scope, setScope] = useState<"" | TransactionScope>("");
 
@@ -491,7 +541,11 @@ function DecisionEditor({
     setRemember(true);
     setRuleName(`Remember ${state.group.label}`);
     setCategoryId(state.group.suggestion?.categoryId ?? "");
+    setCreatingCategory(false);
+    setNewCategoryName("");
     setCounterpartyId(state.group.suggestion?.counterpartyId ?? "");
+    setCreatingCounterparty(false);
+    setNewCounterpartyName("");
     setTransactionType(state.group.suggestion?.transactionType ?? "");
     setScope(state.group.suggestion?.scope ?? "");
   }, [state]);
@@ -499,6 +553,25 @@ function DecisionEditor({
   const mutation = useMutation({
     mutationFn: (input: ApplyReviewDecision) => api.applyReviewDecision(input),
     onSuccess: (result) => onApplied(result.actionId, result.affectedCount),
+  });
+  const queryClient = useQueryClient();
+  const createCategoryMutation = useMutation({
+    mutationFn: (name: string) => api.createCategory({ name }),
+    onSuccess: async (category) => {
+      setCategoryId(category.id);
+      setCreatingCategory(false);
+      setNewCategoryName("");
+      await queryClient.invalidateQueries({ queryKey: ["categories"] });
+    },
+  });
+  const createCounterpartyMutation = useMutation({
+    mutationFn: (displayName: string) => api.createCounterparty({ displayName, kind: "unknown" }),
+    onSuccess: async (counterparty) => {
+      setCounterpartyId(counterparty.id);
+      setCreatingCounterparty(false);
+      setNewCounterpartyName("");
+      await queryClient.invalidateQueries({ queryKey: ["counterparties"] });
+    },
   });
 
   if (!state) {
@@ -517,6 +590,7 @@ function DecisionEditor({
   };
   const needsAction = state.decision === "change";
   const valid = !needsAction || Object.keys(action).length > 0;
+  const narrationSamples = reviewNarrationSamples(state.group, 4);
 
   return (
     <Sheet
@@ -533,58 +607,138 @@ function DecisionEditor({
             <CardDescription>{state.group.transactionCount} grouped transactions</CardDescription>
             <CardTitle>{state.group.label}</CardTitle>
           </CardHeader>
+          {narrationSamples.length > 0 ? (
+            <CardContent className="pt-0">
+              <p className="text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
+                Statement descriptions
+              </p>
+              <div className="mt-2 space-y-1">
+                {narrationSamples.map((narration) => (
+                  <p key={narration} className="text-sm leading-5 text-card-foreground/80">
+                    {narration}
+                  </p>
+                ))}
+              </div>
+              {state.group.transactionCount > narrationSamples.length ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Representative descriptions from this group. Expand the group to inspect every transaction.
+                </p>
+              ) : null}
+            </CardContent>
+          ) : null}
         </Card>
 
         {needsAction ? (
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Category">
-              <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-                <option value="">No category change</option>
-                {categories
-                  .filter(({ archivedAt }) => !archivedAt)
-                  .map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
+              <div className="space-y-2">
+                <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+                  <option value="">No category change</option>
+                  {categories
+                    .filter(({ archivedAt }) => !archivedAt)
+                    .map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                </Select>
+                {creatingCategory ? (
+                  <form className="grid gap-2" onSubmit={(event) => {
+                    event.preventDefault();
+                    const name = newCategoryName.trim();
+                    if (name) createCategoryMutation.mutate(name);
+                  }}>
+                    <Input autoFocus aria-label="New category name" value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Category name" className="bg-card shadow-[var(--shadow-card)]" />
+                    <div className="flex items-center gap-2">
+                      <Button type="submit" size="sm" disabled={!newCategoryName.trim() || createCategoryMutation.isPending}>
+                        {createCategoryMutation.isPending ? "Adding…" : "Add category"}
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => {
+                        setCreatingCategory(false);
+                        setNewCategoryName("");
+                        createCategoryMutation.reset();
+                      }}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                ) : (
+                  <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setCreatingCategory(true)}>
+                    <Plus weight="bold" />
+                    Add category
+                  </Button>
+                )}
+                {createCategoryMutation.isError ? <p className="text-xs text-danger">{errorMessage(createCategoryMutation.error)}</p> : null}
+              </div>
+            </Field>
+            <Field label="Merchant or person">
+              <div className="space-y-2">
+                <Select value={counterpartyId} onChange={(event) => setCounterpartyId(event.target.value)}>
+                  <option value="">No merchant/person change</option>
+                  {counterparties.map((counterparty) => (
+                    <option key={counterparty.id} value={counterparty.id}>
+                      {counterparty.displayName}
                     </option>
                   ))}
-              </Select>
-            </Field>
-            <Field label="Counterparty">
-              <Select
-                value={counterpartyId}
-                onChange={(event) => setCounterpartyId(event.target.value)}
-              >
-                <option value="">No counterparty change</option>
-                {counterparties.map((counterparty) => (
-                  <option key={counterparty.id} value={counterparty.id}>
-                    {counterparty.displayName}
-                  </option>
-                ))}
-              </Select>
+                </Select>
+                {creatingCounterparty ? (
+                  <form className="grid gap-2" onSubmit={(event) => {
+                    event.preventDefault();
+                    const displayName = newCounterpartyName.trim();
+                    if (displayName) createCounterpartyMutation.mutate(displayName);
+                  }}>
+                    <Input autoFocus aria-label="New merchant or person name" value={newCounterpartyName} onChange={(event) => setNewCounterpartyName(event.target.value)} placeholder="Merchant or person" className="bg-card shadow-[var(--shadow-card)]" />
+                    <div className="flex items-center gap-2">
+                      <Button type="submit" size="sm" disabled={!newCounterpartyName.trim() || createCounterpartyMutation.isPending}>
+                        {createCounterpartyMutation.isPending ? "Adding…" : "Add merchant/person"}
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => {
+                        setCreatingCounterparty(false);
+                        setNewCounterpartyName("");
+                        createCounterpartyMutation.reset();
+                      }}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                ) : (
+                  <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setCreatingCounterparty(true)}>
+                    <Plus weight="bold" />
+                    Add merchant or person
+                  </Button>
+                )}
+                {createCounterpartyMutation.isError ? <p className="text-xs text-danger">{errorMessage(createCounterpartyMutation.error)}</p> : null}
+                <p className="text-xs leading-5 text-muted-foreground">The merchant, business, or person that sent or received the money.</p>
+              </div>
             </Field>
             <Field label="Transaction type">
-              <Select
-                value={transactionType}
-                onChange={(event) =>
-                  setTransactionType(event.target.value as typeof transactionType)
-                }
-              >
-                <option value="">No type change</option>
-                {[
-                  "expense",
-                  "income",
-                  "transfer",
-                  "refund",
-                  "fee",
-                  "cash_withdrawal",
-                  "debt",
-                  "unclassified",
-                ].map((type) => (
-                  <option key={type} value={type}>
-                    {type.replaceAll("_", " ")}
-                  </option>
-                ))}
-              </Select>
+              <div className="space-y-1.5">
+                <Select
+                  value={transactionType}
+                  onChange={(event) =>
+                    setTransactionType(event.target.value as typeof transactionType)
+                  }
+                >
+                  <option value="">No type change</option>
+                  {[
+                    "expense",
+                    "income",
+                    "transfer",
+                    "refund",
+                    "fee",
+                    "cash_withdrawal",
+                    "debt",
+                    "unclassified",
+                  ].map((type) => (
+                    <option key={type} value={type}>
+                      {type.replaceAll("_", " ")}
+                    </option>
+                  ))}
+                </Select>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  System-defined because this controls calculations. Use a custom category for a more specific label.
+                </p>
+              </div>
             </Field>
             <Field label="Scope">
               <Select
@@ -758,6 +912,20 @@ function formatGroupTotal(total: ReviewGroup["totals"][number]): string {
   return pieces.join(", ");
 }
 
+function isAiReviewGroup(group: ReviewGroup): boolean {
+  return group.evidence.some((item) => item.source === "ai");
+}
+
+function reviewNarrationSamples(group: ReviewGroup, limit = 2): string[] {
+  return [
+    ...new Set(
+      group.transactions
+        .map(({ narration }) => narration.trim())
+        .filter((narration) => narration && narration !== "No description"),
+    ),
+  ].slice(0, limit);
+}
+
 function formatMoney(amountMinor: number, currency: string): string {
   return new Intl.NumberFormat("en-NG", { style: "currency", currency }).format(amountMinor / 100);
 }
@@ -782,10 +950,13 @@ function selectedTransactionIds(
   groups: ReviewGroup[],
   selected: Record<string, Set<string>>,
 ): string[] {
-  const explicit = [...new Set(Object.values(selected).flatMap((ids) => [...ids]))];
+  const currentIds = new Set(groups.flatMap((group) => group.transactions.map(({ id }) => id)));
+  const explicit = [
+    ...new Set(Object.values(selected).flatMap((ids) => [...ids].filter((id) => currentIds.has(id)))),
+  ];
   return explicit.length > 0
     ? explicit
-    : [...new Set(groups.flatMap((group) => group.transactions.map(({ id }) => id)))];
+    : [...currentIds];
 }
 
 function errorMessage(error: unknown): string {

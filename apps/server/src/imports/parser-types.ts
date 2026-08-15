@@ -70,7 +70,9 @@ export class StatementParserError extends Error {
       | "PARSER_UNSUPPORTED"
       | "PALMPAY_HEADER_INVALID"
       | "PALMPAY_ROW_INVALID"
-      | "PALMPAY_DUPLICATE_TRANSACTION_ID",
+      | "PALMPAY_DUPLICATE_TRANSACTION_ID"
+      | "OPAY_HEADER_INVALID"
+      | "OPAY_ROW_INVALID",
     message: string,
   ) {
     super(message);
