@@ -16,6 +16,9 @@ import { secureHeaders } from "hono/secure-headers";
 import { AiClassificationService } from "./ai/ai-classification-service.js";
 import { createAiRoutes } from "./ai/ai-routes.js";
 import { createAnalyticsRoutes } from "./analytics/analytics-routes.js";
+import { createBackupRoutes } from "./backups/backup-routes.js";
+import type { BackupService } from "./backups/backup-service.js";
+import type { MaintenanceCoordinator } from "./backups/maintenance-coordinator.js";
 import { AppError } from "./api/app-error.js";
 import { createErrorHandler } from "./api/error-handler.js";
 import { createInfrastructureRoutes } from "./api/infrastructure-routes.js";
@@ -31,9 +34,10 @@ import { ImportPreviewService } from "./imports/import-service.js";
 import { registerSecurityOpenApi } from "./security/security-openapi.js";
 import { createSecurityRoutes, requireApiAuthentication } from "./security/security-routes.js";
 import type { SecurityService } from "./security/security-service.js";
+import { SPENDLENS_VERSION } from "./version.js";
 import { createTransactionRoutes } from "./transactions/transaction-routes.js";
 
-const version = "0.1.0";
+const version = SPENDLENS_VERSION;
 
 function health(status: ServiceHealth["status"]): ServiceHealth {
   return {
@@ -60,6 +64,9 @@ export interface CreateAppOptions {
   analytics?: AnalyticsEngine;
   importTemporaryRoot?: string;
   logger?: OperationalLogger;
+  backups?: BackupService;
+  maintenance?: MaintenanceCoordinator;
+  nextScheduledBackupAt?: () => Date | null;
 }
 
 const healthResponse = {
@@ -162,11 +169,30 @@ export function createApp(options: CreateAppOptions = {}) {
     );
 
     app.use("/api/*", requireApiAuthentication(security));
+    if (options.maintenance) {
+      app.use("/api/*", async (context, next) => {
+        const operation = options.maintenance?.activeOperation;
+        const isMutation = !["GET", "HEAD", "OPTIONS"].includes(context.req.method);
+        const isBackupRequest = context.req.path.startsWith("/api/backups");
+        if (operation && isMutation && !isBackupRequest) {
+          throw new AppError(
+            "backup",
+            "MAINTENANCE_IN_PROGRESS",
+            "SpendLens is protecting the database. Try again shortly.",
+            503,
+            { retryAfterSeconds: 5, retryable: true },
+          );
+        }
+        await next();
+      });
+    }
     app.route(
       "/",
       createSecurityRoutes({
         security,
         secureCookies: options.secureCookies ?? false,
+        ...(options.backups ? { backups: options.backups } : {}),
+        ...(options.maintenance ? { maintenance: options.maintenance } : {}),
       }),
     );
     app.route("/", createInfrastructureRoutes({ jobs, audit, sqlite }));
@@ -206,6 +232,18 @@ export function createApp(options: CreateAppOptions = {}) {
       }),
     );
     app.route("/", createAnalyticsRoutes(analytics));
+    if (options.backups) {
+      app.route(
+        "/",
+        createBackupRoutes({
+          backups: options.backups,
+          security,
+          ...(options.nextScheduledBackupAt
+            ? { nextScheduledAt: options.nextScheduledBackupAt }
+            : {}),
+        }),
+      );
+    }
     app.openAPIRegistry.registerComponent("securitySchemes", "sessionCookie", {
       type: "apiKey",
       in: "cookie",

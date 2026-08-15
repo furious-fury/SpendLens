@@ -75,6 +75,41 @@ pnpm security:recover -- --recovery-file /safe/path/spendlens-recovery.json
 The command prompts without echoing the recovery code or new password. It validates access, creates
 a pre-recovery copy of the encrypted database, changes the password, and revokes existing sessions.
 
+## Encrypted backups and device-loss restoration
+
+Create and download a portable `.slbackup` file from Settings → Security. The backup remains
+encrypted and still requires the matching recovery file and recovery code.
+
+Automatic daily backups run at 02:00 in the workspace timezone only when a server-side backup
+folder is configured:
+
+```bash
+SPENDLENS_BACKUP_DIR=/safe/backups/spendlens
+```
+
+Prefer another physical drive or mounted volume. A backup on the same drive protects against some
+mistakes, but not drive or device loss.
+
+Verify a backup while SpendLens is stopped:
+
+```bash
+pnpm backup:verify -- --backup /safe/path/workspace.slbackup --recovery-file /safe/path/spendlens-recovery.json
+```
+
+Restore onto a clean machine:
+
+```bash
+pnpm backup:restore -- --backup /safe/path/workspace.slbackup --recovery-file /safe/path/spendlens-recovery.json
+```
+
+Replacing an existing workspace additionally requires `--replace-existing` and
+`--confirm-workspace <current-workspace-id>`. Restoration preserves the login password stored in
+the backup. Use `pnpm security:recover` afterward if that password is also unavailable.
+
+API keys stored in the local operating-system keyring are intentionally not copied into portable
+backups and must be entered again after device loss. Self-hosted provider credentials stored inside
+the encrypted database remain portable.
+
 ## Quality commands
 
 ```bash

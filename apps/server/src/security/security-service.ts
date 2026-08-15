@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import type {
   AuthenticatedUser,
   ChangePasswordRequest,
@@ -9,6 +9,7 @@ import type {
 } from "@spendlens/contracts";
 import {
   AuditLog,
+  backupRecords,
   createEncryptedDatabase,
   type DatabaseKeyProvider,
   databaseExists,
@@ -17,6 +18,11 @@ import {
   type EncryptedDatabaseOptions,
   generateDatabaseKey,
   openEncryptedDatabase,
+  applyMigrations,
+  migrationChecksums,
+  latestMigrationId,
+  pendingMigrations,
+  releaseState,
   securityEvents,
   seedStarterTaxonomy,
   sessions,
@@ -42,6 +48,11 @@ export interface SecurityServiceOptions extends EncryptedDatabaseOptions {
   setupTokenPath: string;
   clock?: () => number;
   rateLimiter?: LoginRateLimiter;
+  beforeMigrate?: (
+    database: EncryptedDatabase,
+    pending: ReturnType<typeof pendingMigrations>,
+  ) => Promise<string | undefined>;
+  applicationVersion?: string;
 }
 
 export interface SessionCredentials {
@@ -66,6 +77,7 @@ export class SecurityService {
   readonly #setupToken: SetupTokenManager;
   readonly #clock: () => number;
   readonly #rateLimiter: LoginRateLimiter;
+  readonly #applicationVersion: string;
   readonly #databaseRekeyHooks = new Set<DatabaseRekeyHook>();
   #database: EncryptedDatabase | null = null;
 
@@ -77,12 +89,90 @@ export class SecurityService {
     this.#setupToken = new SetupTokenManager(options.setupTokenPath);
     this.#clock = options.clock ?? Date.now;
     this.#rateLimiter = options.rateLimiter ?? new LoginRateLimiter(this.#clock);
+    this.#applicationVersion = options.applicationVersion ?? "0.1.0";
   }
 
   static async create(options: SecurityServiceOptions): Promise<SecurityService> {
     const service = new SecurityService(options);
     if (await databaseExists(options.filePath)) {
-      service.#database = await openEncryptedDatabase(service.#databaseOptions);
+      service.#database = await openEncryptedDatabase({ ...service.#databaseOptions, migrate: false });
+      assertRecordedMigrationChecksums(service.#database);
+      const pending = pendingMigrations(service.#database.sqlite);
+      if (pending.length > 0) {
+        const latestPending = pending.at(-1);
+        if (!latestPending) throw new Error("Pending migration metadata is unavailable.");
+        const previousSchema = service.#database.sqlite
+          .prepare("SELECT id FROM _spendlens_migrations ORDER BY id DESC LIMIT 1")
+          .get() as { id: string } | undefined;
+        const existingWorkspace = service.#database.sqlite
+          .prepare("SELECT id FROM workspaces LIMIT 1")
+          .get();
+        const preUpgradeBackupPath = await options.beforeMigrate?.(service.#database, pending);
+        if (existingWorkspace && !preUpgradeBackupPath) {
+          throw new Error("DATABASE_SAFETY_BACKUP_REQUIRED");
+        }
+        applyMigrations(service.#database.sqlite);
+        const workspace = service.#database.sqlite
+          .prepare("SELECT id FROM workspaces LIMIT 1")
+          .get() as { id: string } | undefined;
+        if (workspace) {
+          let preUpgradeBackupId: string | undefined;
+          if (preUpgradeBackupPath) {
+            preUpgradeBackupId = randomUUID();
+            service.#database.db
+              .insert(backupRecords)
+              .values({
+                id: preUpgradeBackupId,
+                workspaceId: workspace.id,
+                kind: "pre_upgrade",
+                storagePath: preUpgradeBackupPath,
+                applicationVersion: options.applicationVersion ?? "0.1.0",
+                schemaVersion: previousSchema?.id ?? "unversioned",
+                sizeBytes: (await stat(preUpgradeBackupPath)).size,
+                validation: "valid",
+                createdAt: new Date(service.#clock()),
+                completedAt: new Date(service.#clock()),
+              })
+              .run();
+          }
+          service.#database.db
+            .insert(releaseState)
+            .values({
+              workspaceId: workspace.id,
+              applicationVersion: options.applicationVersion ?? "0.1.0",
+              schemaVersion: latestPending.id,
+              lastMigrationId: latestPending.id,
+              lastMigrationCompatibility: latestPending.compatibility,
+              lastMigrationPhase: latestPending.phase,
+              migrationChecksums: JSON.stringify(migrationChecksums()),
+              preUpgradeBackupId,
+              updatedAt: new Date(service.#clock()),
+            })
+            .onConflictDoUpdate({
+              target: releaseState.workspaceId,
+              set: {
+                applicationVersion: options.applicationVersion ?? "0.1.0",
+                schemaVersion: latestPending.id,
+                lastMigrationId: latestPending.id,
+                lastMigrationCompatibility: latestPending.compatibility,
+                lastMigrationPhase: latestPending.phase,
+                migrationChecksums: JSON.stringify(migrationChecksums()),
+                preUpgradeBackupId,
+                updatedAt: new Date(service.#clock()),
+              },
+            })
+            .run();
+          if (preUpgradeBackupPath) {
+            new AuditLog(service.#database.sqlite, service.#clock).record({
+              workspaceId: workspace.id,
+              entityType: "database",
+              entityId: workspace.id,
+              action: "database.migrated",
+              afterState: { schemaVersion: latestPending.id, preUpgradeBackupCreated: true },
+            });
+          }
+        }
+      }
       if (!service.#workspace()?.setupCompletedAt) {
         await service.#setupToken.ensure();
       }
@@ -102,6 +192,18 @@ export class SecurityService {
 
   get sqlite(): EncryptedDatabase["sqlite"] | null {
     return this.#database?.sqlite ?? null;
+  }
+
+  get encryptedDatabase(): EncryptedDatabase | null {
+    return this.#database;
+  }
+
+  async reauthenticate(session: AuthenticatedSession, password: string): Promise<void> {
+    const database = this.#readyDatabase();
+    const user = database.db.select().from(users).where(eq(users.id, session.user.id)).get();
+    if (!user || !(await verifyPassword(user.passwordHash, password))) {
+      throw new SecurityError("INVALID_CREDENTIALS", "The password is incorrect.", 401);
+    }
   }
 
   aiCredentialKey(): Buffer {
@@ -253,6 +355,20 @@ export class SecurityService {
         beforeState: { setupStatus: "recovery-required" },
         afterState: { setupStatus: "complete" },
       });
+      database.db
+        .insert(releaseState)
+        .values({
+          workspaceId: workspace.id,
+          applicationVersion: this.#applicationVersion,
+          schemaVersion: latestMigrationId(),
+          lastMigrationId: latestMigrationId(),
+          lastMigrationCompatibility: "backward-compatible",
+          lastMigrationPhase: "expand",
+          migrationChecksums: JSON.stringify(migrationChecksums()),
+          updatedAt: now,
+        })
+        .onConflictDoNothing()
+        .run();
     })();
     await this.#setupToken.consume();
     this.#recordEvent("workspace.setup_completed", "success", remoteAddress, workspace.id, user.id);
@@ -604,6 +720,24 @@ export class SecurityService {
 
   #audit(): AuditLog {
     return new AuditLog(this.#readyDatabase().sqlite, this.#clock);
+  }
+}
+
+function assertRecordedMigrationChecksums(database: EncryptedDatabase): void {
+  const hasReleaseState = database.sqlite
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'release_state'")
+    .get();
+  if (!hasReleaseState) return;
+  const row = database.sqlite
+    .prepare("SELECT migration_checksums AS checksums FROM release_state LIMIT 1")
+    .get() as { checksums: string } | undefined;
+  if (!row) return;
+  const recorded = JSON.parse(row.checksums) as Record<string, string>;
+  const current = migrationChecksums();
+  for (const [id, checksum] of Object.entries(recorded)) {
+    if (current[id] !== checksum) {
+      throw new Error(`DATABASE_MIGRATION_CHECKSUM_MISMATCH:${id}`);
+    }
   }
 }
 

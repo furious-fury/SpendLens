@@ -9,6 +9,8 @@ export interface SecurityRuntimeConfig {
   setupTokenPath: string;
   keyProvider: OsKeyringProvider | SecretFileKeyProvider;
   secureCookies: boolean;
+  backupDirectory?: string;
+  maintenanceLockPath: string;
 }
 
 export function loadSecurityRuntimeConfig(
@@ -23,6 +25,9 @@ export function loadSecurityRuntimeConfig(
     environment.SPENDLENS_SETUP_TOKEN_PATH ?? join(dataDirectory, "setup-token"),
   );
   const secretPath = environment.SPENDLENS_DATABASE_KEY_FILE;
+  const backupDirectory = environment.SPENDLENS_BACKUP_DIR
+    ? resolve(environment.SPENDLENS_BACKUP_DIR)
+    : undefined;
   const keyProvider = secretPath
     ? new SecretFileKeyProvider(
         isAbsolute(secretPath) ? secretPath : resolve(workspaceRoot, secretPath),
@@ -35,6 +40,8 @@ export function loadSecurityRuntimeConfig(
     setupTokenPath,
     keyProvider,
     secureCookies: environment.SPENDLENS_SECURE_COOKIES === "true",
+    ...(backupDirectory ? { backupDirectory } : {}),
+    maintenanceLockPath: join(dataDirectory, "maintenance.lock"),
   };
 }
 

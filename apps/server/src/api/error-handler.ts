@@ -5,6 +5,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError } from "./app-error.js";
 import type { OperationalLogger } from "./operational-logger.js";
 import type { AppEnv } from "./request-context.js";
+import { MaintenanceConflictError } from "../backups/maintenance-coordinator.js";
 
 export function createErrorHandler(logger: OperationalLogger) {
   return (error: Error, context: Context<AppEnv>) => {
@@ -13,6 +14,10 @@ export function createErrorHandler(logger: OperationalLogger) {
     const appError =
       error instanceof AppError
         ? error
+        : error instanceof MaintenanceConflictError
+          ? new AppError("backup", "MAINTENANCE_CONFLICT", error.message, 409, {
+              retryable: true,
+            })
         : new AppError("internal", "INTERNAL_ERROR", "The request could not be completed.", 500);
 
     if (appError.options.retryAfterSeconds) {

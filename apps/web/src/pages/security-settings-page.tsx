@@ -4,11 +4,13 @@ import {
   Copy,
   Database,
   DownloadSimple,
+  HardDrives,
+  Warning,
   Key,
   SignOut,
 } from "@phosphor-icons/react";
 import type { RecoveryKit } from "@spendlens/contracts";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { AiProviderSettings } from "@/components/ai-provider-settings";
 import { downloadRecoveryFile, useSecurity } from "@/components/security-gate";
@@ -27,6 +29,7 @@ export function SecuritySettingsPage() {
     confirmPassword: "",
   });
   const [rekeyPassword, setRekeyPassword] = useState("");
+  const [backupPassword, setBackupPassword] = useState("");
   const [recoveryKit, setRecoveryKit] = useState<RecoveryKit | null>(null);
   const changePassword = useMutation({
     mutationFn: () => api.changePassword(passwordForm),
@@ -45,6 +48,22 @@ export function SecuritySettingsPage() {
       setRecoveryKit(kit);
       setRekeyPassword("");
     },
+  });
+  const backupStatus = useQuery({
+    queryKey: ["backup-status"],
+    queryFn: api.backupStatus,
+  });
+  const createBackup = useMutation({
+    mutationFn: () => api.createBackup(backupPassword),
+    onSuccess: (download) => {
+      saveDownload(download.blob, download.filename);
+      setBackupPassword("");
+      return queryClient.invalidateQueries({ queryKey: ["backup-status"] });
+    },
+  });
+  const downloadBackup = useMutation({
+    mutationFn: (backupId: string) => api.downloadBackup(backupId, backupPassword),
+    onSuccess: (download) => saveDownload(download.blob, download.filename),
   });
 
   function submitPassword(event: FormEvent) {
@@ -120,6 +139,123 @@ export function SecuritySettingsPage() {
       </Card>
 
       <AiProviderSettings />
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-start gap-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+              <HardDrives />
+            </span>
+            <div>
+              <CardTitle>Encrypted backups</CardTitle>
+              <CardDescription>
+                Download a portable backup or review automatic backup protection.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {backupStatus.isLoading ? (
+            <p className="text-sm text-muted-foreground">Checking backup protection…</p>
+          ) : backupStatus.error ? (
+            <SettingsError error={backupStatus.error} />
+          ) : backupStatus.data ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <BackupFact
+                  label="Automatic backups"
+                  value={backupStatus.data.scheduleEnabled ? "Enabled" : "Not configured"}
+                />
+                <BackupFact
+                  label="Last successful"
+                  value={formatBackupDate(backupStatus.data.lastSuccessfulAt)}
+                />
+                <BackupFact
+                  label="Next scheduled"
+                  value={formatBackupDate(backupStatus.data.nextScheduledAt)}
+                />
+              </div>
+              {!backupStatus.data.backupDirectoryConfigured && (
+                <BackupWarning>
+                  Set <code>SPENDLENS_BACKUP_DIR</code> on the server to enable daily 02:00 backups.
+                </BackupWarning>
+              )}
+              {backupStatus.data.sameVolumeWarning && (
+                <BackupWarning>
+                  The automatic backup folder appears to be on the same drive as SpendLens. It will
+                  not protect against drive loss.
+                </BackupWarning>
+              )}
+              <BackupWarning>
+                SpendLens cannot verify where your recovery file was saved. Keep the backup,
+                recovery file, and recovery code in separate safe locations.
+              </BackupWarning>
+            </>
+          ) : null}
+
+          <form
+            className="flex max-w-2xl flex-col gap-3 sm:flex-row sm:items-end"
+            onSubmit={(event) => {
+              event.preventDefault();
+              createBackup.mutate();
+            }}
+          >
+            <div className="flex-1">
+              <PasswordInput
+                id="backup-password"
+                label="Confirm your password"
+                value={backupPassword}
+                onChange={setBackupPassword}
+                autoComplete="current-password"
+              />
+            </div>
+            <Button disabled={!backupPassword || createBackup.isPending}>
+              <DownloadSimple />
+              {createBackup.isPending ? "Creating backup…" : "Create and download"}
+            </Button>
+          </form>
+          {createBackup.error && <SettingsError error={createBackup.error} />}
+          {downloadBackup.error && <SettingsError error={downloadBackup.error} />}
+
+          {backupStatus.data?.items.some(
+            (item) => item.kind === "scheduled" && item.availableForDownload,
+          ) && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Recent automatic backups</p>
+              {backupStatus.data.items
+                .filter((item) => item.kind === "scheduled" && item.availableForDownload)
+                .slice(0, 5)
+                .map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{formatBackupDate(item.createdAt)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {item.sizeBytes === null ? "Validated" : formatBytes(item.sizeBytes)} · {item.schemaVersion}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!backupPassword || downloadBackup.isPending}
+                      onClick={() => downloadBackup.mutate(item.id)}
+                    >
+                      <DownloadSimple />
+                      Download
+                    </Button>
+                  </div>
+                ))}
+            </div>
+          )}
+          <p className="text-xs leading-5 text-muted-foreground">
+            Restoration is intentionally offline. Stop SpendLens and run the backup restore command
+            with this file and your separate recovery material.
+          </p>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -258,4 +394,40 @@ function SettingsError({ error }: { error: unknown }) {
       {retry}
     </p>
   );
+}
+
+function BackupFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 text-sm font-medium">{value}</p>
+    </div>
+  );
+}
+
+function BackupWarning({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="flex items-start gap-2 rounded-lg border border-attention/30 bg-attention/8 p-3 text-sm">
+      <Warning className="mt-0.5 size-4 shrink-0 text-attention" weight="fill" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
+function formatBackupDate(value: string | null): string {
+  return value ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "Not yet";
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function saveDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }

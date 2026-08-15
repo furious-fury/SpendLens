@@ -11,6 +11,7 @@ import { databaseSchema } from "./schema.js";
 export interface EncryptedDatabaseOptions {
   filePath: string;
   keyProvider: DatabaseKeyProvider;
+  migrate?: boolean;
 }
 
 export interface EncryptedDatabase {
@@ -58,7 +59,7 @@ export async function createEncryptedDatabase(
   let sqlite: Database.Database | undefined;
   try {
     sqlite = openDriver(options.filePath, key);
-    applyMigrations(sqlite);
+    if (options.migrate !== false) applyMigrations(sqlite);
     return buildDatabase(options, sqlite, key);
   } catch (error) {
     sqlite?.close();
@@ -86,7 +87,7 @@ export async function openEncryptedDatabase(
   try {
     sqlite = openDriver(options.filePath, key);
     sqlite.prepare("SELECT count(*) FROM sqlite_master").get();
-    applyMigrations(sqlite);
+    if (options.migrate !== false) applyMigrations(sqlite);
     return buildDatabase(options, sqlite, key);
   } catch (error) {
     sqlite?.close();
@@ -108,16 +109,43 @@ export function generateDatabaseKey(): Buffer {
   return randomBytes(32);
 }
 
+export async function createEncryptedSnapshot(
+  database: EncryptedDatabase,
+  destinationPath: string,
+): Promise<void> {
+  if (await databaseExists(destinationPath)) {
+    throw new Error("The encrypted snapshot destination already exists.");
+  }
+  await mkdir(dirname(destinationPath), { recursive: true, mode: 0o700 });
+  const escapedDestination = destinationPath.replaceAll("\\", "/").replaceAll("'", "''");
+
+  database.sqlite.pragma("wal_checkpoint(TRUNCATE)");
+  database.sqlite.pragma("journal_mode=DELETE");
+  try {
+    database.sqlite.exec(`VACUUM INTO '${escapedDestination}'`);
+  } catch (error) {
+    await unlink(destinationPath).catch(() => undefined);
+    throw error;
+  } finally {
+    database.sqlite.pragma("journal_mode=WAL");
+  }
+}
+
 function openDriver(filePath: string, key: Buffer): Database.Database {
   assertDatabaseKey(key);
   const sqlite = new Database(filePath);
-  sqlite.pragma("cipher='sqlcipher'");
-  sqlite.pragma("legacy=4");
-  sqlite.pragma(`key="x'${serializeDatabaseKey(key)}'"`);
-  sqlite.pragma("foreign_keys=ON");
-  sqlite.pragma("journal_mode=WAL");
-  sqlite.pragma("synchronous=FULL");
-  return sqlite;
+  try {
+    sqlite.pragma("cipher='sqlcipher'");
+    sqlite.pragma("legacy=4");
+    sqlite.pragma(`key="x'${serializeDatabaseKey(key)}'"`);
+    sqlite.pragma("foreign_keys=ON");
+    sqlite.pragma("journal_mode=WAL");
+    sqlite.pragma("synchronous=FULL");
+    return sqlite;
+  } catch (error) {
+    sqlite.close();
+    throw error;
+  }
 }
 
 function buildDatabase(

@@ -12,6 +12,8 @@ import type { MiddlewareHandler } from "hono";
 import type { AppEnv } from "../api/request-context.js";
 import { SecurityError } from "./security-error.js";
 import type { SecurityService, SessionCredentials } from "./security-service.js";
+import type { BackupService } from "../backups/backup-service.js";
+import type { MaintenanceCoordinator } from "../backups/maintenance-coordinator.js";
 
 export const SESSION_COOKIE = "spendlens_session";
 export const CSRF_COOKIE = "spendlens_csrf";
@@ -21,6 +23,8 @@ export interface SecurityRoutesOptions {
   security: SecurityService;
   secureCookies: boolean;
   resolveRemoteAddress?: (request: Request) => string;
+  backups?: BackupService;
+  maintenance?: MaintenanceCoordinator;
 }
 
 const publicSecurityPaths = new Set<string>([
@@ -126,11 +130,18 @@ export function createSecurityRoutes(options: SecurityRoutesOptions): Hono<AppEn
   routes.post(apiPaths.rekey, async (context) => {
     const session = authenticatedMutation(context.req.raw, options.security);
     const input = await parseBody(context.req.raw, RekeyRequestSchema);
-    const recoveryKit = await options.security.rekeyDatabase(
-      session,
-      input.password,
-      remoteAddress(context.req.raw),
-    );
+    await options.security.reauthenticate(session, input.password);
+    const rotate = async () => {
+      await options.backups?.createSafetyWithinMaintenance("pre_rekey");
+      return options.security.rekeyDatabase(
+        session,
+        input.password,
+        remoteAddress(context.req.raw),
+      );
+    };
+    const recoveryKit = options.maintenance
+      ? await options.maintenance.run("rekey", rotate)
+      : await rotate();
     return context.json({ recoveryKit });
   });
 

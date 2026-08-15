@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes, randomUUID } from "node:crypto";
-import { Entry } from "@napi-rs/keyring";
+import { createRequire } from "node:module";
 import type {
   AiProviderInput,
   AiProviderKind,
@@ -87,8 +87,13 @@ export class AiProviderStore {
     this.#encryptionKey = options.encryptionKey;
     this.#credentialEntry =
       options.credentialEntry ??
-      ((workspaceId, settingId) =>
-        new Entry(CREDENTIAL_KEYRING_SERVICE, `${workspaceId}:${settingId}`));
+      ((workspaceId, settingId) => {
+        const require = createRequire(import.meta.url);
+        const { Entry } = require("@napi-rs/keyring") as {
+          Entry: new (service: string, account: string) => CredentialEntry;
+        };
+        return new Entry(CREDENTIAL_KEYRING_SERVICE, `${workspaceId}:${settingId}`);
+      });
     this.#clock = options.clock ?? Date.now;
     if (this.#credentialStorage === "encrypted_database" && !this.#encryptionKey) {
       throw new Error("Encrypted provider credentials require a database-derived subkey.");

@@ -31,6 +31,7 @@ export class JobWorker {
   #timer: ReturnType<typeof setTimeout> | null = null;
   #started = false;
   #stopping = false;
+  #activeRun: Promise<JobRecord | null> | null = null;
 
   constructor(options: JobWorkerOptions) {
     this.#queue = options.queue;
@@ -58,7 +59,20 @@ export class JobWorker {
     }
   }
 
-  async runOnce(): Promise<JobRecord | null> {
+  async stopAndDrain(): Promise<void> {
+    this.stop();
+    await this.#activeRun;
+  }
+
+  runOnce(): Promise<JobRecord | null> {
+    const operation = this.#runOnceInternal();
+    this.#activeRun = operation;
+    return operation.finally(() => {
+      if (this.#activeRun === operation) this.#activeRun = null;
+    });
+  }
+
+  async #runOnceInternal(): Promise<JobRecord | null> {
     if (!this.#isReady()) return null;
     this.#queue.recoverAbandoned();
     const job = this.#queue.claim(this.#workerId, this.#leaseDurationMs);
