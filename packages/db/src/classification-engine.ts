@@ -583,7 +583,14 @@ export class ClassificationEngine {
     let suggestion: ClassificationSuggestion | null = null;
     let code = "";
     let label = "";
-    if (
+    if (transaction.direction === "debit" && /\bbolt\b/u.test(narration)) {
+      suggestion = {
+        categoryId: this.#categoryId(transaction.workspace_id, "ride-hailing"),
+        transactionType: "expense",
+      };
+      code = "transport.ride_hailing";
+      label = `${transaction.institution_name} narration indicates a Bolt ride-hailing payment.`;
+    } else if (
       transaction.direction === "debit" &&
       /\b(fee|charge|levy|commission|stamp duty)\b/u.test(narration)
     ) {

@@ -1,24 +1,11 @@
 import {
-  ArrowLineDown,
-  ArrowLineUp,
-  ArrowsLeftRight,
-  Bank,
-  BookOpenText,
-  Brain,
   CaretDoubleLeft,
   CaretDoubleRight,
-  ChartBar,
-  CurrencyCircleDollar,
-  DotsThree,
-  FileArrowDown,
   Gauge,
-  GearSix,
+  CaretRight,
   List,
-  MagnifyingGlass,
-  Receipt,
   SealCheck,
   SignOut,
-  SlidersHorizontal,
   X,
   type Icon,
 } from "@phosphor-icons/react";
@@ -28,30 +15,49 @@ import { ThemeMenu } from "@/components/theme-menu";
 import { useSecurity } from "@/components/security-gate";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  SuppliedBank,
+  SuppliedBookSaved,
+  SuppliedChart,
+  SuppliedDocumentDownload,
+  SuppliedGear,
+  SuppliedExportArrow,
+  SuppliedFlashCircle,
+  SuppliedImportArrow,
+  SuppliedMore,
+  SuppliedReceipt,
+  SuppliedSearch,
+  SuppliedSliders,
+  SuppliedTransfer,
+} from "@/components/supplied-icons";
+import { SpendLensMark } from "@/components/spendlens-logo";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
   label: string;
   path: string;
-  icon: Icon;
+  icon: Icon | typeof SuppliedBank;
   shortLabel?: string;
 }
 
 const primaryNavigation: NavItem[] = [
   { label: "Overview", path: "/", icon: Gauge },
-  { label: "Transactions", path: "/transactions", icon: Receipt },
-  { label: "Review", path: "/review", icon: BookOpenText },
-  { label: "Spending", path: "/spending", icon: ArrowLineUp },
-  { label: "Income", path: "/income", icon: ArrowLineDown },
-  { label: "Cash Flow", path: "/cash-flow", icon: ArrowsLeftRight },
-  { label: "Behaviour", path: "/behaviour", icon: Brain },
+  { label: "Transactions", path: "/transactions", icon: SuppliedReceipt },
+  { label: "Review", path: "/review", icon: SuppliedBookSaved },
+];
+
+const insightNavigation: NavItem[] = [
+  { label: "Spending", path: "/spending", icon: SuppliedExportArrow },
+  { label: "Income", path: "/income", icon: SuppliedImportArrow },
+  { label: "Cash Flow", path: "/cash-flow", icon: SuppliedTransfer },
+  { label: "Behaviour", path: "/behaviour", icon: SuppliedFlashCircle },
 ];
 
 const managementNavigation: NavItem[] = [
-  { label: "Imports", path: "/imports", icon: FileArrowDown },
-  { label: "Rules", path: "/rules", icon: SlidersHorizontal },
-  { label: "Accounts", path: "/accounts", icon: Bank },
-  { label: "Settings", path: "/settings", icon: GearSix },
+  { label: "Imports", path: "/imports", icon: SuppliedDocumentDownload },
+  { label: "Rules", path: "/rules", icon: SuppliedSliders },
+  { label: "Accounts", path: "/accounts", icon: SuppliedBank },
+  { label: "Settings", path: "/settings", icon: SuppliedGear },
 ];
 
 const mobileNavigation: NavItem[] = [
@@ -60,11 +66,11 @@ const mobileNavigation: NavItem[] = [
     label: "Transactions",
     shortLabel: "Transactions",
     path: "/transactions",
-    icon: Receipt,
+    icon: SuppliedReceipt,
   },
-  { label: "Review", shortLabel: "Review", path: "/review", icon: BookOpenText },
-  { label: "Insights", shortLabel: "Insights", path: "/spending", icon: ChartBar },
-  { label: "More", shortLabel: "More", path: "/settings", icon: DotsThree },
+  { label: "Review", shortLabel: "Review", path: "/review", icon: SuppliedBookSaved },
+  { label: "Insights", shortLabel: "Insights", path: "/spending", icon: SuppliedChart },
+  { label: "More", shortLabel: "More", path: "/settings", icon: SuppliedMore },
 ];
 
 const defaultRouteMeta = {
@@ -115,20 +121,58 @@ const routeTitles: Record<string, { title: string; description: string }> = {
     description: "Control privacy, appearance, AI providers, and backups.",
   },
 };
+const routeSections: Record<string, string> = {
+  "/": "Workspace",
+  "/transactions": "Workspace",
+  "/review": "Workspace",
+  "/spending": "Insights",
+  "/income": "Insights",
+  "/cash-flow": "Insights",
+  "/behaviour": "Insights",
+  "/imports": "Manage",
+  "/rules": "Manage",
+  "/accounts": "Manage",
+  "/settings": "Manage",
+};
+
+function PageHeader({
+  meta,
+  section,
+}: {
+  meta: { title: string; description: string };
+  section: string;
+}) {
+  return (
+    <header className="mb-6 flex flex-col gap-3 border-b border-border bg-background px-4 py-4 sm:flex-row sm:items-end sm:justify-between md:px-5 md:py-5">
+      <div className="min-w-0">
+        <h1 className="text-2xl font-semibold tracking-[-0.035em] md:text-[28px]">{meta.title}</h1>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{meta.description}</p>
+      </div>
+      <nav className="order-first shrink-0 sm:order-last sm:pb-1" aria-label="Breadcrumb">
+        <ol className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          <li>{section}</li>
+          <li aria-hidden="true"><CaretRight className="size-3.5" weight="bold" /></li>
+          <li className="text-foreground" aria-current="page">{meta.title}</li>
+        </ol>
+      </nav>
+    </header>
+  );
+}
+
 
 function Brand({ collapsed = false }: { collapsed?: boolean }) {
   return (
     <Link to="/" className="flex min-w-0 items-center gap-3" aria-label="SpendLens overview">
-      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground shadow-sm">
-        <CurrencyCircleDollar className="size-5" weight="regular" />
+      <span className="grid size-10 shrink-0 place-items-center rounded-md border border-black/5 bg-white/95 shadow-sm">
+        <SpendLensMark className="size-8" tone="accent" />
       </span>
       {!collapsed && (
         <span className="min-w-0">
           <span className="block truncate text-[15px] font-semibold tracking-[-0.02em]">
             SpendLens
           </span>
-          <span className="block truncate text-[10px] font-medium uppercase tracking-[0.16em] text-sidebar-foreground/45">
-            Private intelligence
+          <span className="block truncate text-[9px] font-medium uppercase tracking-[0.1em] text-sidebar-foreground/50">
+            Open source personal finance
           </span>
         </span>
       )}
@@ -139,30 +183,37 @@ function Brand({ collapsed = false }: { collapsed?: boolean }) {
 function NavigationLink({
   collapsed,
   item,
+  active,
   onNavigate,
 }: {
   collapsed: boolean;
   item: NavItem;
+  active: boolean;
   onNavigate?: () => void;
 }) {
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const active = item.path === "/" ? pathname === "/" : pathname.startsWith(item.path);
   const Icon = item.icon;
   const content = (
     <Link
       to={item.path}
       onClick={onNavigate}
       className={cn(
-        "group relative flex h-10 items-center gap-3 rounded-lg px-3 text-sm font-medium text-sidebar-foreground/64 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
-        active && "bg-sidebar-accent text-sidebar-foreground",
+        "group relative flex h-10 items-center gap-3 rounded pr-3 text-sm text-sidebar-foreground/62 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+        active && "bg-sidebar-accent font-medium text-sidebar-foreground",
         collapsed && "justify-center px-0",
       )}
     >
-      <Icon className="size-[18px] shrink-0" weight={active ? "bold" : "regular"} />
-      {!collapsed && <span>{item.label}</span>}
-      {active && (
-        <span className="absolute inset-y-2 -right-px w-0.5 rounded-full bg-sidebar-primary" />
-      )}
+      <span
+        className={cn(
+          "grid h-full w-10 shrink-0 place-items-center rounded-l rounded-r-none transition-[background-color,color,box-shadow]",
+          active
+            ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+            : "text-sidebar-foreground/58 group-hover:text-sidebar-foreground",
+          collapsed && "w-full rounded",
+        )}
+      >
+        <Icon className="size-[17px]" weight="bold" />
+      </span>
+      {!collapsed && <span className="leading-none">{item.label}</span>}
     </Link>
   );
 
@@ -175,6 +226,54 @@ function NavigationLink({
       <TooltipTrigger asChild>{content}</TooltipTrigger>
       <TooltipContent side="right">{item.label}</TooltipContent>
     </Tooltip>
+  );
+}
+
+const navigationSections = [
+  { label: "Workspace", ariaLabel: "Primary navigation", items: primaryNavigation },
+  { label: "Insights", ariaLabel: "Insights navigation", items: insightNavigation },
+  { label: "Manage", ariaLabel: "Management navigation", items: managementNavigation },
+];
+
+export function isNavigationItemActive(pathname: string, itemPath: string) {
+  return itemPath === "/" ? pathname === "/" : pathname.startsWith(itemPath);
+}
+
+function SidebarNavigation({
+  collapsed,
+  onNavigate,
+}: {
+  collapsed: boolean;
+  onNavigate: () => void;
+}) {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  return (
+    <div>
+      {navigationSections.map((section, index) => (
+        <div
+          key={section.label}
+          className={cn(index > 0 && "mt-5 border-t border-sidebar-border pt-5")}
+        >
+          {!collapsed && (
+            <p className="mb-2 px-2.5 text-[11px] font-semibold uppercase tracking-[0.11em] text-sidebar-foreground/42">
+              {section.label}
+            </p>
+          )}
+          <nav aria-label={section.ariaLabel} className="space-y-1.5">
+            {section.items.map((item) => (
+              <NavigationLink
+                key={item.path}
+                collapsed={collapsed}
+                item={item}
+                active={isNavigationItemActive(pathname, item.path)}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </nav>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -203,7 +302,7 @@ function Sidebar({
       )}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width,transform] duration-200",
+          "fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width,transform] duration-200",
           collapsed && "lg:w-[76px]",
           mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         )}
@@ -226,40 +325,15 @@ function Sidebar({
           </Button>
         </div>
 
-        <div className="scrollbar-none flex-1 overflow-y-auto px-3 py-5">
-          <nav aria-label="Primary navigation" className="space-y-1">
-            {primaryNavigation.map((item) => (
-              <NavigationLink
-                key={item.path}
-                collapsed={collapsed}
-                item={item}
-                onNavigate={onMobileClose}
-              />
-            ))}
-          </nav>
-          <div className="my-5 h-px bg-sidebar-border" />
-          {!collapsed && (
-            <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/35">
-              Manage
-            </p>
-          )}
-          <nav aria-label="Management navigation" className="space-y-1">
-            {managementNavigation.map((item) => (
-              <NavigationLink
-                key={item.path}
-                collapsed={collapsed}
-                item={item}
-                onNavigate={onMobileClose}
-              />
-            ))}
-          </nav>
+        <div className="scrollbar-none flex-1 overflow-y-auto px-3 py-4">
+          <SidebarNavigation collapsed={collapsed} onNavigate={onMobileClose} />
         </div>
 
         <div className="border-t border-sidebar-border p-3">
           <button
             type="button"
             className={cn(
-              "hidden h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:flex",
+              "hidden h-10 w-full items-center gap-3 rounded px-3 text-sm text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:flex",
               collapsed && "justify-center px-0",
             )}
             onClick={onCollapse}
@@ -270,11 +344,11 @@ function Sidebar({
           </button>
           <div
             className={cn(
-              "mt-1 flex items-center gap-3 rounded-lg px-3 py-2",
+              "mt-1 flex items-center gap-3 rounded px-3 py-2",
               collapsed && "justify-center px-0",
             )}
           >
-            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-sidebar-primary/15 text-sidebar-primary">
+            <span className="grid size-8 shrink-0 place-items-center rounded-md bg-sidebar-primary/15 text-sidebar-primary">
               <SealCheck className="size-4" weight="fill" />
             </span>
             {!collapsed && (
@@ -289,7 +363,7 @@ function Sidebar({
           <button
             type="button"
             className={cn(
-              "mt-1 flex h-9 w-full items-center gap-3 rounded-lg px-3 text-xs text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
+              "mt-1 flex h-9 w-full items-center gap-3 rounded px-3 text-xs text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
               collapsed && "justify-center px-0",
             )}
             onClick={onSignOut}
@@ -367,11 +441,11 @@ export function AppShell() {
         />
         <div
           className={cn(
-            "min-h-dvh transition-[padding] duration-200 lg:pl-64",
+            "app-main-surface min-h-dvh transition-[padding] duration-200 lg:pl-72",
             collapsed && "lg:pl-[76px]",
           )}
         >
-          <header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border bg-background/92 px-4 backdrop-blur md:px-6">
+          <header className="sticky top-0 z-20 grid h-[72px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-sidebar-border bg-sidebar/92 px-4 backdrop-blur md:grid-cols-[minmax(2.5rem,1fr)_minmax(20rem,50rem)_minmax(2.5rem,1fr)] md:px-7">
             <div className="flex min-w-0 items-center gap-3">
               <Button
                 variant="ghost"
@@ -382,29 +456,22 @@ export function AppShell() {
               >
                 <List />
               </Button>
-              <div className="min-w-0">
-                <h1 className="truncate text-lg font-semibold tracking-[-0.025em]">{meta.title}</h1>
-                <p className="hidden truncate text-xs text-muted-foreground sm:block">
-                  {meta.description}
-                </p>
-              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="hidden h-9 w-56 items-center gap-2 rounded-lg border border-border bg-muted/45 px-3 text-left text-sm text-muted-foreground transition-colors hover:bg-muted md:flex"
-                aria-label="Search SpendLens"
-              >
-                <MagnifyingGlass className="size-4" />
-                <span className="flex-1">Search transactions</span>
-                <kbd className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px]">
-                  /
-                </kbd>
-              </button>
+            <button
+              type="button"
+              className="hidden h-10 w-full items-center gap-2.5 rounded-xl border border-border bg-background/72 px-3.5 text-left text-sm text-muted-foreground shadow-[0_1px_2px_oklch(0.2_0.02_260_/_0.04)] transition-[background-color,border-color,box-shadow] hover:border-primary/25 hover:bg-background hover:shadow-sm md:flex"
+              aria-label="Search SpendLens"
+            >
+              <SuppliedSearch className="size-[17px]" />
+              <span className="flex-1">Search transactions</span>
+              <kbd className="rounded-md border border-border bg-card px-1.5 py-0.5 text-[10px] shadow-sm">/</kbd>
+            </button>
+            <div className="flex items-center justify-end gap-2">
               <ThemeMenu />
             </div>
           </header>
-          <main className="mx-auto w-full max-w-[1600px] p-4 pb-24 md:p-6 lg:pb-8">
+          <main className="relative z-10 mx-auto w-full max-w-[1540px] p-4 pb-24 md:p-7 lg:pb-10">
+            <PageHeader meta={meta} section={routeSections[pathname] ?? "SpendLens"} />
             <Outlet />
           </main>
         </div>

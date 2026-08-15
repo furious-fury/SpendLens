@@ -28,6 +28,7 @@ interface ReviewRow {
   id: string;
   occurred_at_utc: number;
   normalized_narration: string | null;
+  raw_narration: string | null;
   amount_minor: number;
   currency: string;
   direction: "debit" | "credit";
@@ -438,6 +439,14 @@ export class ClassificationReview {
           t.id,
           t.occurred_at_utc,
           t.normalized_narration,
+          (SELECT psr.raw_narration
+             FROM transaction_sources ts
+             JOIN parsed_source_rows psr ON psr.id = ts.parsed_source_row_id
+            WHERE ts.transaction_id = t.id
+            ORDER BY CASE ts.link_type WHEN 'original' THEN 0 ELSE 1 END,
+                     ts.created_at ASC,
+                     ts.import_batch_id ASC
+            LIMIT 1) AS raw_narration,
           t.amount_minor,
           t.currency,
           t.direction,
@@ -929,6 +938,7 @@ function toReviewGroup(group: MutableGroup): ReviewGroup {
       id: row.id,
       occurredAt: new Date(row.occurred_at_utc).toISOString(),
       narration: displayNarration(row),
+      rawNarration: row.raw_narration?.trim() || null,
       amountMinor: row.amount_minor,
       currency: row.currency,
       direction: row.direction,

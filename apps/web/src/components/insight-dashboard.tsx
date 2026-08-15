@@ -44,7 +44,10 @@ export function InsightDashboard({
 }) {
   return (
     <div className="space-y-5">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Insight summary">
+      <section
+        className="grid overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-card)] sm:grid-cols-2 xl:grid-cols-4"
+        aria-label="Insight summary"
+      >
         {config.summaryMetricIds.map((metricId) => (
           <MetricCard
             key={metricId}
@@ -134,7 +137,7 @@ function MetricCard({
   const canOpen = metric.transactionIds.length > 0;
   const comparison = metric.comparison;
   return (
-    <Card className="relative overflow-hidden">
+    <Card className="relative overflow-hidden rounded-none border-0 border-b bg-transparent sm:odd:border-r xl:border-r xl:border-b-0 xl:last:border-r-0">
       <button
         type="button"
         className="block w-full text-left disabled:cursor-default"
@@ -146,9 +149,11 @@ function MetricCard({
             : `${metric.title}: unavailable`
         }
       >
-        <CardHeader className="pb-2">
+        <CardHeader className="p-5 pb-2">
           <CardDescription>{metric.title}</CardDescription>
-          <CardTitle className="font-tabular text-2xl">{metricValue(metric, currency)}</CardTitle>
+          <CardTitle className="font-tabular text-[1.65rem] tracking-[-0.045em]">
+            {metricValue(metric, currency)}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {metric.status === "unavailable" ? (
@@ -354,7 +359,7 @@ function MetricChart({
                       tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
                     />
                     <Tooltip content={<ChartTooltip metric={metric} currency={currency} />} />
-                    <Bar dataKey="value" radius={[0, 5, 5, 0]} maxBarSize={24}>
+                    <Bar dataKey="value" radius={[0, 2, 2, 0]} maxBarSize={24}>
                       {data.map((item, index) => (
                         <Cell
                           key={item.key}

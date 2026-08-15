@@ -188,14 +188,14 @@ function InsightsPage({ path }: { path: InsightPath }) {
     <div className="space-y-5">
       <InsightTabs path={path} filters={filters} />
 
-      <section className="rounded-xl border border-border bg-card p-4 md:p-5">
+      <section className="rounded-xl border border-border bg-card p-4 shadow-[var(--shadow-card)] md:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3">
             <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/8 text-primary">
               <ChartBar />
             </span>
             <div>
-              <h1 className="text-lg font-semibold tracking-tight">{config.title}</h1>
+              <h2 className="text-base font-semibold tracking-tight">{config.title}</h2>
               <p className="mt-1 text-sm text-muted-foreground">{config.subtitle}</p>
             </div>
           </div>
@@ -223,6 +223,7 @@ function InsightsPage({ path }: { path: InsightPath }) {
       <DashboardFilters
         accounts={accounts}
         value={filters}
+        showRangePresets
         onChange={(next) => updateSearch(next)}
         disabled={analyticsQuery.isPending}
       />

@@ -976,6 +976,7 @@ export const ReviewGroupTransactionSchema = z.object({
   id: z.string().uuid(),
   occurredAt: z.string().datetime(),
   narration: z.string(),
+  rawNarration: z.string().nullable(),
   amountMinor: z.number().int().positive(),
   currency: z.string().length(3),
   direction: TransactionDirectionSchema,
@@ -1423,6 +1424,7 @@ export const apiPaths = {
   aiProviderTest: (providerSettingId: string) => `/api/ai/providers/${providerSettingId}/test`,
   aiProviderModels: (providerSettingId: string) => `/api/ai/providers/${providerSettingId}/models`,
   aiClassificationJobs: "/api/ai/classification-jobs",
+  activeAiClassificationJob: "/api/ai/classification-jobs/active",
   analyticsRegistry: "/api/analytics/metrics/registry",
   analyticsMetrics: "/api/analytics/metrics/query",
 } as const;

@@ -81,6 +81,7 @@ describe("OpenAPI and structured API behavior", () => {
     expect(document.paths).toHaveProperty("/api/ai/providers/{providerSettingId}/test");
     expect(document.paths).toHaveProperty("/api/ai/providers/{providerSettingId}/models");
     expect(document.paths).toHaveProperty("/api/ai/classification-jobs");
+    expect(document.paths).toHaveProperty("/api/ai/classification-jobs/active");
     expect(document.paths).toHaveProperty("/api/analytics/metrics/registry");
     expect(document.paths).toHaveProperty("/api/analytics/metrics/query");
 
@@ -92,6 +93,27 @@ describe("OpenAPI and structured API behavior", () => {
       code: "VALIDATION_FAILED",
       family: "validation",
       requestId: expect.any(String),
+    });
+    fixture.close();
+  });
+
+  it("recovers the active AI classification job for a refreshed client", async () => {
+    const fixture = await initializedFixture();
+    const queued = fixture.jobs.enqueueExclusive({
+      workspaceId: fixture.workspaceId,
+      jobType: "classification.ai",
+      idempotencyKey: "refresh-recovery",
+      payload: { providerSettingId: crypto.randomUUID(), transactionIds: [] },
+    });
+
+    const response = await fixture.app.request(apiPaths.activeAiClassificationJob, {
+      headers: fixture.authHeaders(),
+    });
+
+    expect(response.status).toBe(200);
+    expect(JobSchema.parse(await response.json())).toMatchObject({
+      id: queued.id,
+      status: "queued",
     });
     fixture.close();
   });

@@ -4,6 +4,7 @@ import {
   type ImportPreviewStore,
   type StoredImportPreview,
 } from "@spendlens/db";
+import { OPayStatementParser } from "./opay-parser.js";
 import { PalmPayStatementParser } from "./palmpay-parser.js";
 import { readPositionedPdf } from "./pdf-document.js";
 import { selectParser } from "./parser-types.js";
@@ -37,7 +38,10 @@ export class ImportPreviewService {
       if (duplicate) throw new DuplicateImportError(duplicate.id);
 
       const document = await readPositionedPdf(upload.filePath);
-      const parser = selectParser(document, [new PalmPayStatementParser()]);
+      const parser = selectParser(document, [
+        new PalmPayStatementParser(),
+        new OPayStatementParser(),
+      ]);
       const statement = parser.parse(document);
       return this.#store.save(
         {
@@ -66,7 +70,7 @@ export class ImportPreviewService {
             currency: transaction.currency,
             narration: transaction.narration,
             fallbackFingerprint: fallbackTransactionFingerprint(transaction),
-            rowFingerprint: rowFingerprint(transaction),
+            rowFingerprint: rowFingerprint(parser.key, transaction),
             rawFields: {
               sourcePage: transaction.pageNumber,
               parserKey: parser.key,
@@ -82,7 +86,7 @@ export class ImportPreviewService {
   }
 }
 
-function rowFingerprint(transaction: {
+function rowFingerprint(adapterKey: string, transaction: {
   sourceTransactionId: string;
   sourceTimestamp: string;
   direction: string;
@@ -92,7 +96,7 @@ function rowFingerprint(transaction: {
   return createHash("sha256")
     .update(
       [
-        "palmpay",
+        adapterKey === "palmpay-ng-pdf" ? "palmpay" : adapterKey,
         transaction.sourceTransactionId,
         transaction.sourceTimestamp,
         transaction.direction,

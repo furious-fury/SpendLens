@@ -27,6 +27,8 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -73,7 +75,12 @@ export function OverviewDashboard({ result }: OverviewDashboardProps) {
 
   return (
     <div className="space-y-5">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Cash-flow summary">
+      <AttentionStrip review={review} duplicates={duplicates} coverage={coverage} />
+
+      <section
+        className="grid overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-card)] sm:grid-cols-2 xl:grid-cols-4"
+        aria-label="Cash-flow summary"
+      >
         <MetricCard metric={inflow} currency={currency} label="Total inflow" icon={ArrowLineDown} />
         <MetricCard
           metric={outflow}
@@ -87,11 +94,19 @@ export function OverviewDashboard({ result }: OverviewDashboardProps) {
       </section>
 
       <section
-        className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,1fr)]"
+        className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(330px,.75fr)]"
         aria-label="Financial charts"
       >
         <CashFlowChart metric={cumulative} currency={currency} />
+        <SpendingComposition metric={categories} currency={currency} />
+      </section>
+
+      <section
+        className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,1fr)]"
+        aria-label="Spending and data quality"
+      >
         <CategoryChart metric={categories} currency={currency} />
+        <QualitySummary coverage={coverage} review={review} duplicates={duplicates} />
       </section>
 
       <section className="grid gap-5 lg:grid-cols-3" aria-label="Financial highlights">
@@ -99,11 +114,55 @@ export function OverviewDashboard({ result }: OverviewDashboardProps) {
         <UnusualActivity unusual={unusual} largest={largest} currency={currency} />
         <RecurringSummary metric={recurring} currency={currency} />
       </section>
-
-      <section aria-label="Data quality and review status">
-        <QualitySummary coverage={coverage} review={review} duplicates={duplicates} />
-      </section>
     </div>
+  );
+}
+
+function AttentionStrip({
+  coverage,
+  duplicates,
+  review,
+}: {
+  coverage: AnalyticsMetricResult;
+  duplicates: AnalyticsMetricResult;
+  review: AnalyticsMetricResult;
+}) {
+  const reviewCount = review.value ?? 0;
+  const duplicateCount = duplicates.value ?? 0;
+  const coveragePercent = Math.round((coverage.value ?? 0) / 100);
+
+  return (
+    <section
+      className="flex flex-col gap-3 rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-[var(--shadow-card)] md:flex-row md:items-center md:gap-0"
+      aria-label="Items needing attention"
+    >
+      <div className="flex items-center gap-2 md:pr-5">
+        <span className="grid size-7 place-items-center rounded-lg bg-primary/10 text-primary">
+          <BookOpenText className="size-4" weight="bold" aria-hidden="true" />
+        </span>
+        <span>
+          <strong className="font-semibold">{reviewCount}</strong> transactions need review
+        </span>
+      </div>
+      <div className="flex items-center gap-2 md:border-l md:border-border md:px-5">
+        <Copy className="size-4 text-attention" aria-hidden="true" />
+        <span>
+          <strong className="font-semibold">{duplicateCount}</strong> possible duplicates
+        </span>
+      </div>
+      <div className="flex items-center gap-2 md:border-l md:border-border md:px-5">
+        <CheckCircle className="size-4 text-success" aria-hidden="true" />
+        <span>
+          <strong className="font-semibold">{coveragePercent}%</strong> classified
+        </span>
+      </div>
+      <Link
+        to="/review"
+        className="inline-flex items-center gap-1 font-medium text-primary hover:underline md:ml-auto"
+      >
+        Open review <ArrowRight className="size-3.5" />
+      </Link>
+    </section>
   );
 }
 
@@ -123,23 +182,25 @@ export function MetricCard({
   const comparison = metric.comparison;
   const direction = comparisonTone((comparison?.absoluteChange ?? 0) * (invertComparison ? -1 : 1));
   return (
-    <Card>
-      <CardHeader className="flex-row items-start justify-between gap-4 pb-3">
+    <Card className="rounded-none border-0 border-b bg-transparent sm:odd:border-r xl:border-r xl:border-b-0 xl:last:border-r-0">
+      <CardHeader className="flex-row items-start justify-between gap-4 p-5 pb-3">
         <div className="min-w-0">
           <CardDescription>{label}</CardDescription>
           {metric.status === "available" && metric.value !== null ? (
-            <CardTitle className="mt-2 truncate font-tabular text-2xl">
+            <CardTitle className="mt-2 truncate font-tabular text-[1.65rem] tracking-[-0.045em]">
               {formatMoney(metric.value, currency)}
             </CardTitle>
           ) : (
             <CardTitle className="mt-2 text-xl">Unavailable</CardTitle>
           )}
         </div>
-        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/8 text-primary">
-          <Icon className="size-[18px]" weight="regular" aria-hidden="true" />
-        </span>
+        <Icon
+          className="size-[17px] shrink-0 text-muted-foreground"
+          weight="regular"
+          aria-hidden="true"
+        />
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-5 pb-5">
         {metric.status === "unavailable" ? (
           <p className="flex items-start gap-1.5 text-xs leading-5 text-muted-foreground">
             <Question className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
@@ -189,7 +250,7 @@ export function CashFlowChart({
   return (
     <Card className="min-w-0">
       <CardHeader className="border-b border-border">
-        <CardTitle>Cash-flow trend</CardTitle>
+        <CardTitle>Cash flow over time</CardTitle>
         <CardDescription>Cumulative net movement across the selected period.</CardDescription>
       </CardHeader>
       <CardContent className="pt-5">
@@ -200,7 +261,7 @@ export function CashFlowChart({
             <span id="cash-flow-chart-title" className="sr-only">
               Cumulative cash-flow chart
             </span>
-            <div className="h-[270px] w-full" role="img" aria-label="Cumulative cash flow by day">
+            <div className="h-[310px] w-full" role="img" aria-label="Cumulative cash flow by day">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={data} accessibilityLayer margin={{ left: 4, right: 12, top: 8 }}>
                   <defs>
@@ -209,7 +270,7 @@ export function CashFlowChart({
                       <stop offset="100%" stopColor="var(--primary)" stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 5" />
+                  <CartesianGrid vertical={false} stroke="var(--border)" />
                   <XAxis
                     dataKey="label"
                     axisLine={false}
@@ -259,6 +320,93 @@ export function CashFlowChart({
   );
 }
 
+function SpendingComposition({
+  currency,
+  metric,
+}: {
+  currency: string;
+  metric: AnalyticsMetricResult;
+}) {
+  const data = metric.breakdown.slice(0, 5);
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+
+  return (
+    <Card className="min-w-0">
+      <CardHeader className="border-b border-border">
+        <CardTitle>Spending composition</CardTitle>
+        <CardDescription>Share of outflow by category.</CardDescription>
+      </CardHeader>
+      <CardContent className="pt-5">
+        {data.length === 0 ? (
+          <ChartEmpty message="No spending categories in this period." />
+        ) : (
+          <>
+            <figure
+              className="relative mx-auto h-[190px] max-w-[260px]"
+              aria-label="Spending composition donut chart"
+            >
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart accessibilityLayer>
+                  <Pie
+                    data={data}
+                    dataKey="value"
+                    nameKey="label"
+                    innerRadius={62}
+                    outerRadius={82}
+                    paddingAngle={2}
+                    stroke="var(--card)"
+                    strokeWidth={3}
+                  >
+                    {data.map((item, index) => (
+                      <Cell
+                        key={item.key}
+                        fill={CATEGORY_COLOURS[index % CATEGORY_COLOURS.length] ?? "var(--primary)"}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      borderColor: "var(--border)",
+                      borderRadius: 10,
+                      background: "var(--popover)",
+                      color: "var(--popover-foreground)",
+                    }}
+                    formatter={(value) => [formatMoney(Number(value), currency), "Spending"]}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 grid place-content-center text-center">
+                <span className="font-tabular text-xl font-semibold tracking-[-0.04em]">
+                  {formatMoney(total, currency, { compact: true })}
+                </span>
+                <span className="text-[11px] text-muted-foreground">top categories</span>
+              </div>
+            </figure>
+            <div className="mt-2 space-y-2.5">
+              {data.slice(0, 4).map((item, index) => (
+                <div key={item.key} className="flex items-center gap-2.5 text-xs">
+                  <span
+                    className="size-2 rounded-full"
+                    style={{
+                      background:
+                        CATEGORY_COLOURS[index % CATEGORY_COLOURS.length] ?? "var(--primary)",
+                    }}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {item.label}
+                  </span>
+                  <span className="font-tabular font-medium">
+                    {formatMoney(item.value, currency)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 export function CategoryChart({
   currency,
   metric,
@@ -292,7 +440,7 @@ export function CategoryChart({
                   layout="vertical"
                   margin={{ left: 6, right: 12 }}
                 >
-                  <CartesianGrid horizontal={false} stroke="var(--border)" strokeDasharray="3 5" />
+                  <CartesianGrid horizontal={false} stroke="var(--border)" />
                   <XAxis
                     type="number"
                     axisLine={false}
@@ -321,7 +469,7 @@ export function CategoryChart({
                     formatter={(value) => [formatMoney(Number(value), currency), "Spending"]}
                     labelFormatter={(_, payload) => payload[0]?.payload.label ?? ""}
                   />
-                  <Bar dataKey="value" radius={[0, 5, 5, 0]} maxBarSize={24}>
+                  <Bar dataKey="value" radius={[0, 2, 2, 0]} maxBarSize={24}>
                     {data.map((item, index) => (
                       <Cell
                         key={item.key}
@@ -433,7 +581,7 @@ function InsightCard({
         </div>
         <Icon className="size-4 shrink-0 text-primary" aria-hidden="true" />
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-5 pb-5">
         {empty ? (
           <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
             {emptyMessage}
@@ -478,41 +626,54 @@ function QualitySummary({
   const reviewCount = review.value ?? 0;
   const duplicateCount = duplicates.value ?? 0;
   const needsAttention = reviewCount > 0 || duplicateCount > 0;
+
   return (
     <Card>
-      <CardContent className="grid gap-5 p-5 lg:grid-cols-[minmax(260px,1.2fr)_repeat(2,minmax(150px,.55fr))_auto] lg:items-center">
-        <div>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-medium text-muted-foreground">Classification quality</p>
-              <p className="mt-1 text-sm font-semibold">{qualityLabel(coverageValue)}</p>
-            </div>
-            <span className="font-tabular text-lg font-semibold">{percentage.toFixed(0)}%</span>
-          </div>
+      <CardHeader className="border-b border-border">
+        <CardTitle>Classification health</CardTitle>
+        <CardDescription>How much of your activity SpendLens understands.</CardDescription>
+      </CardHeader>
+      <CardContent className="pt-5">
+        <div className="flex items-center gap-5">
           <div
-            className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"
+            className="relative grid size-28 shrink-0 place-items-center rounded-full"
+            style={{
+              background: `conic-gradient(var(--primary) ${percentage}%, var(--muted) 0)`,
+            }}
             role="progressbar"
             aria-label="Classification coverage"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(percentage)}
           >
-            <div className="h-full rounded-full bg-primary" style={{ width: `${percentage}%` }} />
+            <div className="grid size-[86px] place-items-center rounded-full bg-card text-center">
+              <span className="font-tabular text-xl font-semibold">{percentage.toFixed(0)}%</span>
+            </div>
+          </div>
+          <div>
+            <p className="font-semibold">{qualityLabel(coverageValue)}</p>
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">
+              Review uncertain items to keep every chart accurate.
+            </p>
           </div>
         </div>
-        <QualityStat
-          icon={needsAttention ? WarningCircle : CheckCircle}
-          label="Needs review"
-          value={reviewCount}
-          attention={reviewCount > 0}
-        />
-        <QualityStat
-          icon={Copy}
-          label="Possible duplicates"
-          value={duplicateCount}
-          attention={duplicateCount > 0}
-        />
-        <Button asChild variant={needsAttention ? "default" : "outline"}>
+
+        <div className="mt-5 grid grid-cols-2 overflow-hidden rounded-lg border border-border">
+          <QualityStat
+            icon={needsAttention ? WarningCircle : CheckCircle}
+            label="Needs review"
+            value={reviewCount}
+            attention={reviewCount > 0}
+          />
+          <QualityStat
+            icon={Copy}
+            label="Duplicates"
+            value={duplicateCount}
+            attention={duplicateCount > 0}
+          />
+        </div>
+
+        <Button asChild variant={needsAttention ? "default" : "outline"} className="mt-5 w-full">
           <Link to="/review">
             <BookOpenText />
             Open review
@@ -536,7 +697,7 @@ function QualityStat({
   value: number;
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 p-3">
+    <div className="flex min-w-0 items-center gap-2.5 p-3 first:border-r first:border-border">
       <span
         className={cn(
           "grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground",
@@ -545,14 +706,13 @@ function QualityStat({
       >
         <Icon className="size-4" aria-hidden="true" />
       </span>
-      <span>
+      <span className="min-w-0">
         <span className="block font-tabular text-base font-semibold">{value}</span>
-        <span className="block text-xs text-muted-foreground">{label}</span>
+        <span className="block truncate text-xs text-muted-foreground">{label}</span>
       </span>
     </div>
   );
 }
-
 function ChartEmpty({ message }: { message: string }) {
   return (
     <div className="grid h-[270px] place-items-center rounded-lg border border-dashed border-border">

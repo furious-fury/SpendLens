@@ -146,6 +146,7 @@ export function classificationSystemPrompt(categories: string[]): string {
     "You classify financial transactions for SpendLens.",
     "Return only one JSON object matching the requested schema.",
     `Allowed categories and subcategories: ${categories.join(", ")}.`,
+    "Copy category and subcategory names exactly from the allowed list; do not rename, pluralize, or broaden them.",
     "Use only evidence present in the supplied transaction.",
     "Do not invent a counterparty. Use null when it is not supported by the evidence.",
   ].join(" ");

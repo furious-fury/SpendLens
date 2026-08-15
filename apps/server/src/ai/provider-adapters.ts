@@ -90,6 +90,7 @@ abstract class HttpAdapter implements AiProviderAdapter {
         if (response.ok) return await response.json();
         const retryable =
           response.status === 408 || response.status === 429 || response.status >= 500;
+        const detail = await providerErrorDetail(response);
         const error =
           response.status === 429
             ? new AiProviderError(
@@ -99,7 +100,9 @@ abstract class HttpAdapter implements AiProviderAdapter {
               )
             : new AiProviderError(
                 "AI_PROVIDER_UNAVAILABLE",
-                `The provider returned HTTP ${response.status}.`,
+                detail
+                  ? `The provider returned HTTP ${response.status}: ${detail}`
+                  : `The provider returned HTTP ${response.status}. Check the configured endpoint and model.`,
                 retryable,
               );
         if (!retryable || attempt === maxAttempts) throw error;
@@ -151,7 +154,6 @@ export class OpenAiCompatibleAdapter extends HttpAdapter {
         headers: jsonHeaders(bearerHeaders(request.credential)),
         body: JSON.stringify({
           model: request.setting.model,
-          temperature: 0,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: classificationSystemPrompt(request.categories) },
@@ -342,6 +344,22 @@ function withGeminiKey(url: string, credential: string | null): string {
   const parsed = new URL(url);
   parsed.searchParams.set("key", credential);
   return parsed.toString();
+}
+
+async function providerErrorDetail(response: Response): Promise<string | null> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("json")) return null;
+  try {
+    const body: unknown = await response.json();
+    if (!isRecord(body)) return null;
+    const error = isRecord(body.error) ? body.error : body;
+    const message =
+      stringAt(error, "message") ?? stringAt(error, "detail") ?? stringAt(error, "status");
+    if (!message || /secret|token|key|authorization|credential/i.test(message)) return null;
+    return message.replace(/\s+/gu, " ").trim().slice(0, 240) || null;
+  } catch {
+    return null;
+  }
 }
 
 function arrayAt(value: unknown, key: string): unknown[] {

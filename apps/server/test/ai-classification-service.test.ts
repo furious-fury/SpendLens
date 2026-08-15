@@ -142,7 +142,7 @@ describe("AI classification orchestration", () => {
     fixture.sqlite.close();
   });
 
-  it("rejects unknown categories and leaves no pending suggestion", async () => {
+  it("skips unknown categories and leaves no pending suggestion", async () => {
     const fixture = await serviceFixture({
       ...validOutput(),
       category: "Invented category",
@@ -156,14 +156,14 @@ describe("AI classification orchestration", () => {
         },
         fixture.context,
       ),
-    ).rejects.toMatchObject({
-      code: "AI_CLASSIFICATION_CATEGORY_UNKNOWN",
-      retryable: false,
-    });
+    ).resolves.toMatchObject({ suggestionCount: 0, skippedCount: 1 });
     expect(
       fixture.sqlite.prepare("SELECT COUNT(*) AS count FROM ai_classification_suggestions").get(),
     ).toEqual({ count: 0 });
     expect(transactionRow(fixture.sqlite, fixture.transactionId).category_id).toBeNull();
+    expect(fixture.sqlite.prepare("SELECT status FROM ai_classification_runs").get()).toEqual({
+      status: "succeeded",
+    });
     fixture.sqlite.close();
   });
 

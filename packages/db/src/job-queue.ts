@@ -91,6 +91,24 @@ export class JobQueue {
     return mapJob(job);
   }
 
+  enqueueExclusive(input: EnqueueJobInput): JobRecord {
+    return this.#sqlite().transaction(() => {
+      return this.getActive(input.workspaceId, input.jobType) ?? this.enqueue(input);
+    })();
+  }
+
+  getActive(workspaceId: string, jobType: string): JobRecord | null {
+    const row = this.#sqlite()
+      .prepare(
+        `SELECT * FROM jobs
+         WHERE workspace_id = ? AND job_type = ? AND status IN ('queued', 'running')
+         ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, created_at ASC, id ASC
+         LIMIT 1`,
+      )
+      .get(workspaceId, jobType) as JobRow | undefined;
+    return row ? mapJob(row) : null;
+  }
+
   get(workspaceId: string, jobId: string): JobRecord | null {
     const row = this.#sqlite()
       .prepare("SELECT * FROM jobs WHERE id = ? AND workspace_id = ?")

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <pattern id="spendlens-light" width="25" height="25" patternUnits="userSpaceOnUse">
+      <rect width="100%" height="100%" fill="#f2f3f5" />
+      <path fill="none" stroke="#d7dbe2" stroke-width="1.5" d="M25 30a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-25a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM0 30a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM0 5A5 5 0 1 1 0-5 5 5 0 0 1 0 5zm12.5 12.5a5 5 0 1 1 0-10 5 5 0 0 1 0 10z" />
+      <path fill="none" stroke="#c5cbd4" stroke-width="1.5" d="M0 15a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm25 0a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zM12.5 2.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 25a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z" />
+    </pattern>
+  </defs>
+  <rect width="100" height="100" fill="url(#spendlens-light)" />
+</svg>

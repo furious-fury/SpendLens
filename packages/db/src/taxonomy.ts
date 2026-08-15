@@ -67,12 +67,38 @@ export const starterTaxonomy: readonly StarterCategory[] = [
     { isExpense: true, isEssential: true },
     "food-and-dining",
   ),
+  category("restaurants-and-takeout", "Restaurants & Takeout", 120, {
+    isExpense: true,
+    isDiscretionary: true,
+  }, "food-and-dining"),
   category("transport", "Transport", 200, { isExpense: true, isEssential: true }),
+  category("fuel-and-vehicle", "Fuel & Vehicle Costs", 210, {
+    isExpense: true,
+    isEssential: true,
+  }, "transport"),
+  category("public-transport", "Public Transport", 220, {
+    isExpense: true,
+    isEssential: true,
+  }, "transport"),
+  category("ride-hailing", "Ride Hailing", 230, { isExpense: true }, "transport"),
   category("housing-and-rent", "Housing & Rent", 300, {
     isExpense: true,
     isEssential: true,
   }),
+  category("home-repairs", "Home Repairs & Maintenance", 310, {
+    isExpense: true,
+    isEssential: true,
+  }, "housing-and-rent"),
   category("utilities", "Utilities", 400, { isExpense: true, isEssential: true }),
+  category("electricity", "Electricity", 410, {
+    isExpense: true,
+    isEssential: true,
+  }, "utilities"),
+  category("water", "Water", 420, { isExpense: true, isEssential: true }, "utilities"),
+  category("internet-and-cable", "Internet & Cable", 430, {
+    isExpense: true,
+    isEssential: true,
+  }, "utilities"),
   category("airtime-and-data", "Airtime & Data", 500, {
     isExpense: true,
     isEssential: true,
@@ -81,10 +107,35 @@ export const starterTaxonomy: readonly StarterCategory[] = [
     isExpense: true,
     isDiscretionary: true,
   }),
+  category("gaming-and-betting", "Gaming & Betting", 610, {
+    isExpense: true,
+    isDiscretionary: true,
+  }, "entertainment"),
   category("shopping", "Shopping", 700, { isExpense: true, isDiscretionary: true }),
+  category("clothing-and-fashion", "Clothing & Fashion", 710, {
+    isExpense: true,
+    isDiscretionary: true,
+  }, "shopping"),
+  category("electronics", "Electronics", 720, {
+    isExpense: true,
+    isDiscretionary: true,
+  }, "shopping"),
+  category("personal-care", "Personal Care", 750, {
+    isExpense: true,
+    isDiscretionary: true,
+  }),
   category("health", "Health", 800, { isExpense: true, isEssential: true }),
+  category("pharmacy", "Pharmacy", 810, {
+    isExpense: true,
+    isEssential: true,
+  }, "health"),
+  category("insurance", "Insurance", 850, { isExpense: true, isEssential: true }),
   category("education", "Education", 900, { isExpense: true, isEssential: true }),
   category("family-and-support", "Family & Support", 1000, { isExpense: true }),
+  category("childcare", "Childcare", 1010, {
+    isExpense: true,
+    isEssential: true,
+  }, "family-and-support"),
   category("charity-and-giving", "Charity & Giving", 1100, { isExpense: true }),
   category("subscriptions", "Subscriptions", 1200, {
     isExpense: true,
@@ -96,6 +147,10 @@ export const starterTaxonomy: readonly StarterCategory[] = [
     isExpense: true,
     isFee: true,
   }),
+  category("mobile-money-and-pos-fees", "Mobile Money & POS Fees", 1510, {
+    isExpense: true,
+    isFee: true,
+  }, "bank-fees-and-charges"),
   category("taxes", "Taxes", 1600, { isExpense: true, isEssential: true }),
   category("debt-and-loans", "Debt & Loans", 1700, {
     isIncome: true,
@@ -105,12 +160,27 @@ export const starterTaxonomy: readonly StarterCategory[] = [
     isTransfer: true,
     isSavings: true,
   }),
+  category("investments", "Investments", 1810, {
+    isTransfer: true,
+    isSavings: true,
+  }, "savings-and-investments"),
+  category("pension-and-retirement", "Pension & Retirement", 1820, {
+    isTransfer: true,
+    isSavings: true,
+  }, "savings-and-investments"),
   category("salary-and-wages", "Salary & Wages", 1900, { isIncome: true }),
+  category("bonuses-and-other-income", "Bonuses & Other Income", 1910, {
+    isIncome: true,
+  }, "salary-and-wages"),
   category("business-income", "Business Income", 2000, { isIncome: true }),
   category("refunds-and-reversals", "Refunds & Reversals", 2100, {
     isIncome: true,
     isRefund: true,
   }),
+  category("cashback-and-rewards", "Cashback & Rewards", 2110, {
+    isIncome: true,
+    isRefund: true,
+  }, "refunds-and-reversals"),
   category("owned-account-transfers", "Transfers Between Owned Accounts", 2200, {
     isTransfer: true,
   }),

@@ -2,7 +2,6 @@ import {
   ArrowClockwise,
   CheckCircle,
   Copy,
-  CurrencyCircleDollar,
   DownloadSimple,
   Eye,
   EyeSlash,
@@ -24,6 +23,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SpendLensMark } from "@/components/spendlens-logo";
 import { ApiError, api } from "@/lib/api";
 
 interface SecurityContextValue {
@@ -108,12 +108,12 @@ function SecurityFrame({ children }: { children: ReactNode }) {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,color-mix(in_oklch,var(--primary)_9%,transparent),transparent_35%)]" />
       <div className="relative flex w-full flex-col items-center gap-6">
         <div className="flex items-center gap-3">
-          <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
-            <CurrencyCircleDollar className="size-6" />
+          <span className="grid size-11 place-items-center rounded-lg border border-black/5 bg-white/95 shadow-sm">
+            <SpendLensMark className="size-9" />
           </span>
           <div>
             <p className="font-semibold tracking-[-0.02em]">SpendLens</p>
-            <p className="text-xs text-muted-foreground">Private financial intelligence</p>
+            <p className="text-xs text-muted-foreground">Open source personal finance</p>
           </div>
         </div>
         {children}

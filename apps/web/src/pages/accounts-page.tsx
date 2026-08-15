@@ -67,7 +67,7 @@ export function AccountsPage() {
               type="button"
               key={account.id}
               className={cn(
-                "rounded-xl border border-border bg-card p-5 text-left transition-colors hover:border-primary/35 hover:bg-muted/20",
+                "rounded-xl border border-border bg-card p-5 text-left shadow-[var(--shadow-card)] transition-colors hover:border-primary/35 hover:bg-muted/20",
                 account.archivedAt && "opacity-60",
               )}
               onClick={() => setSelected(account)}

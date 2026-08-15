@@ -1,11 +1,14 @@
 import { PDFDocument, StandardFonts } from "pdf-lib";
 
 interface FixtureOptions {
+  creditTransactionId?: string;
   declaredInflow?: string;
   declaredOutflow?: string;
+  debitTransactionId?: string;
   includeText?: boolean;
   pageCount?: number;
   marker?: string;
+  repeatFirstRow?: boolean;
 }
 
 export async function createSanitizedPalmPayPdf(options: FixtureOptions = {}): Promise<Uint8Array> {
@@ -28,7 +31,7 @@ export async function createSanitizedPalmPayPdf(options: FixtureOptions = {}): P
     draw("Statement Period", 359, 660);
     draw("06/01/2026 - 06/30/2026", 477, 660);
     draw("Total Money Out", 26, 645);
-    draw(options.declaredOutflow ?? "250.50", 139, 645);
+    draw(options.declaredOutflow ?? (options.repeatFirstRow ? "0.00" : "250.50"), 139, 645);
     draw("Transaction Date", 26, 614);
     draw("Transaction Detail", 139, 614);
     draw("Money In (NGN)", 252, 614);
@@ -40,14 +43,27 @@ export async function createSanitizedPalmPayPdf(options: FixtureOptions = {}): P
     draw("Example", 139, 578);
     draw("Client", 139, 570);
     draw("+1000.00", 252, 570);
-    draw("fixture-credit-001", 476, 570);
+    draw(options.creditTransactionId ?? "fixture-credit-001", 476, 570);
 
-    draw("06/29/2026 01:10:00 PM", 26, 530);
-    draw("Send to Example Store", 139, 534);
-    draw("Lagos", 139, 526);
-    draw("-250.50", 371, 530);
-    draw("fixture-debit-", 476, 534);
-    draw("002", 476, 526);
+    if (options.repeatFirstRow) {
+      draw("06/30/2026 02:30:10 PM", 26, 530);
+      draw("Received from", 139, 546);
+      draw("Example", 139, 538);
+      draw("Client", 139, 530);
+      draw("+1000.00", 252, 530);
+      draw(options.creditTransactionId ?? "fixture-credit-001", 476, 530);
+    } else {
+      draw("06/29/2026 01:10:00 PM", 26, 530);
+      draw("Send to Example Store", 139, 534);
+      draw("Lagos", 139, 526);
+      draw("-250.50", 371, 530);
+      if (options.debitTransactionId) {
+        draw(options.debitTransactionId, 476, 530);
+      } else {
+        draw("fixture-debit-", 476, 534);
+        draw("002", 476, 526);
+      }
+    }
   }
   return pdf.save();
 }

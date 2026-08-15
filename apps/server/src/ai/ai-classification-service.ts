@@ -175,6 +175,7 @@ export class AiClassificationService {
 
     try {
       const results: PendingResult[] = [];
+      let skippedCount = 0;
       for (const [index, transaction] of transactions.entries()) {
         context.assertActive();
         context.reportProgress(
@@ -188,7 +189,23 @@ export class AiClassificationService {
           payload: payloads[index] as AiTransactionPayload,
         });
         context.assertActive();
-        const suggestion = this.#resolveSuggestion(workspaceId, output);
+        let suggestion: ClassificationSuggestion;
+        try {
+          suggestion = this.#resolveSuggestion(workspaceId, output);
+        } catch (error) {
+          if (
+            error instanceof AiClassificationServiceError &&
+            error.code === "AI_CLASSIFICATION_CATEGORY_UNKNOWN"
+          ) {
+            skippedCount += 1;
+            context.reportProgress(
+              Math.floor(((index + 1) / transactions.length) * 9_000),
+              `Skipped ${index + 1} of ${transactions.length}: category not in workspace`,
+            );
+            continue;
+          }
+          throw error;
+        }
         const evidence: ClassificationEvidence[] = [
           {
             code: "ai.explanation",
@@ -217,8 +234,13 @@ export class AiClassificationService {
         });
       }
       context.assertActive();
-      this.#persistResults(workspaceId, runId, results);
-      context.reportProgress(9_800, "Suggestions added to Review");
+      this.#persistResults(workspaceId, runId, results, skippedCount);
+      context.reportProgress(
+        9_800,
+        skippedCount > 0
+          ? `Suggestions added to Review; ${skippedCount} skipped because their category was not in the workspace`
+          : "Suggestions added to Review",
+      );
       return {
         runId,
         promptVersion: AI_PROMPT_VERSION,
@@ -226,6 +248,7 @@ export class AiClassificationService {
         model: setting.model,
         payloadHash,
         suggestionCount: results.length,
+        skippedCount,
         reviewRequired: true,
       };
     } catch (error) {
@@ -246,7 +269,12 @@ export class AiClassificationService {
     }
   }
 
-  #persistResults(workspaceId: string, runId: string, results: PendingResult[]): void {
+  #persistResults(
+    workspaceId: string,
+    runId: string,
+    results: PendingResult[],
+    skippedCount: number,
+  ): void {
     const sqlite = this.#sqlite();
     sqlite.transaction(() => {
       const insert = sqlite.prepare(
@@ -279,10 +307,13 @@ export class AiClassificationService {
         )
         .run(
           JSON.stringify(
-            results.map(({ transaction, output }) => ({
-              transactionId: transaction.id,
-              output,
-            })),
+            {
+              suggestions: results.map(({ transaction, output }) => ({
+                transactionId: transaction.id,
+                output,
+              })),
+              skippedCount,
+            },
           ),
           now,
           runId,
@@ -311,20 +342,19 @@ export class AiClassificationService {
         );
       }
     });
-    if (
-      transactions.some(
-        (transaction) =>
-          transaction.classificationSource === "manual" ||
-          transaction.confidence === "confirmed" ||
-          transaction.reviewState === "reviewed",
-      )
-    ) {
+    const unresolved = transactions.filter(
+      (transaction) =>
+        transaction.classificationSource !== "manual" &&
+        transaction.confidence !== "confirmed" &&
+        transaction.reviewState !== "reviewed",
+    );
+    if (unresolved.length === 0) {
       throw new AiClassificationServiceError(
         "AI_CLASSIFICATION_SELECTION_INVALID",
         "AI can only suggest classifications for unresolved transactions.",
       );
     }
-    return transactions;
+    return unresolved;
   }
 
   #refreshClassifications(workspaceId: string, transactionIds: string[]): void {
@@ -353,31 +383,22 @@ export class AiClassificationService {
     workspaceId: string,
     output: AiClassificationOutput,
   ): ClassificationSuggestion {
-    const category = output.subcategory
-      ? (this.#sqlite()
-          .prepare(
-            `SELECT child.id, child.name, parent.name AS parent_name
-             FROM categories child
-             JOIN categories parent ON parent.id = child.parent_id
-             WHERE child.workspace_id = ?
-               AND lower(child.name) = lower(?)
-               AND lower(parent.name) = lower(?)
-               AND child.archived_at IS NULL
-             LIMIT 1`,
-          )
-          .get(workspaceId, output.subcategory, output.category) as CategoryRow | undefined)
-      : (this.#sqlite()
-          .prepare(
-            `SELECT category.id, category.name, parent.name AS parent_name
-             FROM categories category
-             LEFT JOIN categories parent ON parent.id = category.parent_id
-             WHERE category.workspace_id = ?
-               AND lower(category.name) = lower(?)
-               AND category.archived_at IS NULL
-             ORDER BY category.parent_id IS NULL DESC
-             LIMIT 1`,
-          )
-          .get(workspaceId, output.category) as CategoryRow | undefined);
+    const categories = this.#sqlite()
+      .prepare(
+        `SELECT category.id, category.name, parent.name AS parent_name
+         FROM categories category
+         LEFT JOIN categories parent ON parent.id = category.parent_id
+         WHERE category.workspace_id = ? AND category.archived_at IS NULL
+         ORDER BY category.parent_id IS NULL DESC, category.name`,
+      )
+      .all(workspaceId) as CategoryRow[];
+    const category = categories.find((candidate) =>
+      output.subcategory
+        ? normalizeCategoryLabel(candidate.name) === normalizeCategoryLabel(output.subcategory) &&
+          normalizeCategoryLabel(candidate.parent_name ?? "") ===
+            normalizeCategoryLabel(output.category)
+        : normalizeCategoryLabel(candidate.name) === normalizeCategoryLabel(output.category),
+    );
     if (!category) {
       throw new AiClassificationServiceError(
         "AI_CLASSIFICATION_CATEGORY_UNKNOWN",
@@ -488,4 +509,12 @@ function safeJsonObject(value: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function normalizeCategoryLabel(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/gu, "and")
+    .replace(/[^a-z0-9]+/gu, "")
+    .trim();
 }

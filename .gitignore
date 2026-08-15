@@ -17,6 +17,7 @@ tmp/
 *.slbackup
 *.slbackup.partial
 restore-journal.json
+spendlens-recovery-*.json
 
 .DS_Store
 Thumbs.db

@@ -1,4 +1,4 @@
-import { FileArrowDown, Receipt } from "@phosphor-icons/react";
+import { Receipt } from "@phosphor-icons/react";
 import {
   createRootRoute,
   createRoute,
@@ -9,6 +9,7 @@ import { lazy, Suspense } from "react";
 import { AppShell } from "@/components/app-shell";
 import { AccountsPage } from "@/pages/accounts-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
+import { ImportPage } from "@/pages/import-page";
 import { ReviewPage } from "@/pages/review-page";
 import { RulesPage } from "@/pages/rules-page";
 import { SecuritySettingsPage } from "@/pages/security-settings-page";
@@ -52,18 +53,6 @@ const rootRoute = createRootRoute({
   ),
 });
 
-function placeholder<const TPath extends string>(
-  path: TPath,
-  title: string,
-  description: string,
-  icon: typeof Receipt,
-) {
-  return createRoute({
-    getParentRoute: () => rootRoute,
-    path,
-    component: () => <PlaceholderPage icon={icon} title={title} description={description} />,
-  });
-}
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -137,6 +126,12 @@ function insightRoute(
     ),
   });
 }
+const importsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/imports",
+  component: ImportPage,
+});
+
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -146,12 +141,7 @@ const routeTree = rootRoute.addChildren([
   insightRoute("/income", IncomePage),
   insightRoute("/cash-flow", CashFlowPage),
   insightRoute("/behaviour", BehaviourPage),
-  placeholder(
-    "/imports",
-    "Import a statement",
-    "Upload a PalmPay PDF, preview detected transactions, and confirm the import safely.",
-    FileArrowDown,
-  ),
+  importsRoute,
   rulesRoute,
   accountsRoute,
   settingsRoute,
