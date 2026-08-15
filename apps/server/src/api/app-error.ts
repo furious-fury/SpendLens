@@ -105,7 +105,22 @@ export const errorFamilies = {
     "AI_CLASSIFICATION_COUNTERPARTY_UNKNOWN",
     "AI_CLASSIFICATION_FAILED",
   ],
-  backup: ["BACKUP_FAILED", "RESTORE_FAILED"],
+  backup: [
+    "BACKUP_FAILED",
+    "BACKUP_NOT_FOUND",
+    "BACKUP_INVALID_FORMAT",
+    "BACKUP_DIGEST_MISMATCH",
+    "BACKUP_AUTHENTICATION_FAILED",
+    "BACKUP_WORKSPACE_MISMATCH",
+    "BACKUP_UNSUPPORTED_SCHEMA",
+    "BACKUP_INSUFFICIENT_SPACE",
+    "BACKUP_UNSAFE_PATH",
+    "BACKUP_DIRECTORY_NOT_CONFIGURED",
+    "MAINTENANCE_CONFLICT",
+    "MAINTENANCE_IN_PROGRESS",
+    "RESTORE_FAILED",
+    "RESTORE_INTERRUPTED",
+  ],
   database: ["DATABASE_UNAVAILABLE", "DATABASE_OPERATION_FAILED"],
   internal: ["INTERNAL_ERROR", "JOB_HANDLER_MISSING"],
 } as const satisfies Record<ErrorFamily, readonly string[]>;
@@ -127,5 +142,6 @@ export function familyForCode(code: string): ErrorFamily {
     return "authentication";
   }
   if (code.startsWith("DATABASE_")) return "database";
+  if (code.startsWith("BACKUP_") || code.startsWith("RESTORE_") || code.startsWith("MAINTENANCE_")) return "backup";
   return "internal";
 }

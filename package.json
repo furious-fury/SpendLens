@@ -10,6 +10,8 @@
   },
   "scripts": {
     "build": "pnpm --filter @spendlens/contracts build && pnpm --filter @spendlens/db build && pnpm --filter @spendlens/web build && pnpm --filter @spendlens/server build",
+    "backup:verify": "pnpm --filter @spendlens/contracts build && pnpm --filter @spendlens/db build && pnpm --filter @spendlens/server backup:verify",
+    "backup:restore": "pnpm --filter @spendlens/contracts build && pnpm --filter @spendlens/db build && pnpm --filter @spendlens/server backup:restore",
     "predev": "pnpm dev:doctor",
     "dev": "pnpm --parallel --filter @spendlens/server --filter @spendlens/web dev",
     "dev:doctor": "node scripts/dev-doctor.mjs",

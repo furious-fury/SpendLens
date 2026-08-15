@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { Entry } from "@napi-rs/keyring";
+import { createRequire } from "node:module";
 
 const DATABASE_KEY_BYTES = 32;
 const DATABASE_KEY_HEX_LENGTH = DATABASE_KEY_BYTES * 2;
@@ -42,7 +42,15 @@ export class OsKeyringProvider implements DatabaseKeyProvider {
   readonly #entry: KeyringEntry;
 
   constructor(service = "SpendLens", account = "default-workspace-database", entry?: KeyringEntry) {
-    this.#entry = entry ?? new Entry(service, account);
+    if (entry) {
+      this.#entry = entry;
+      return;
+    }
+    const require = createRequire(import.meta.url);
+    const { Entry } = require("@napi-rs/keyring") as {
+      Entry: new (service: string, account: string) => KeyringEntry;
+    };
+    this.#entry = new Entry(service, account);
   }
 
   async load(): Promise<Buffer | null> {

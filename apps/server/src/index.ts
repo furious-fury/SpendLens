@@ -6,14 +6,24 @@ import { AiClassificationService } from "./ai/ai-classification-service.js";
 import { AI_CLASSIFICATION_JOB_TYPE } from "./ai/ai-routes.js";
 import { createJsonLogger } from "./api/operational-logger.js";
 import { createApp } from "./app.js";
+import { BackupScheduler } from "./backups/backup-scheduler.js";
+import { BackupService, createUntrackedSafetyBackup } from "./backups/backup-service.js";
+import { MaintenanceCoordinator } from "./backups/maintenance-coordinator.js";
+import { recoverInterruptedRestore } from "./backups/restore-service.js";
 import { JobWorker } from "./jobs/job-worker.js";
 import { loadSecurityRuntimeConfig } from "./security/runtime-config.js";
 import { SecurityService } from "./security/security-service.js";
+import { SPENDLENS_VERSION } from "./version.js";
 
 const port = Number.parseInt(process.env.SPENDLENS_PORT ?? "4545", 10);
 const host = process.env.SPENDLENS_HOST ?? "127.0.0.1";
 const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
 const securityConfig = loadSecurityRuntimeConfig();
+
+await recoverInterruptedRestore({
+  dataDirectory: securityConfig.dataDirectory,
+  keyProvider: securityConfig.keyProvider,
+});
 
 if (host !== "127.0.0.1" && host !== "::1" && !securityConfig.secureCookies) {
   throw new Error(
@@ -21,11 +31,22 @@ if (host !== "127.0.0.1" && host !== "::1" && !securityConfig.secureCookies) {
   );
 }
 
-const security = await SecurityService.create({
-  filePath: securityConfig.databasePath,
-  keyProvider: securityConfig.keyProvider,
-  setupTokenPath: securityConfig.setupTokenPath,
-});
+const maintenance = new MaintenanceCoordinator(securityConfig.maintenanceLockPath);
+const security = await maintenance.run("upgrade", () =>
+  SecurityService.create({
+    filePath: securityConfig.databasePath,
+    keyProvider: securityConfig.keyProvider,
+    setupTokenPath: securityConfig.setupTokenPath,
+    applicationVersion: SPENDLENS_VERSION,
+    beforeMigrate: (database) =>
+      createUntrackedSafetyBackup({
+        database,
+        directory: `${securityConfig.dataDirectory}/safety-backups`,
+        applicationVersion: SPENDLENS_VERSION,
+        kind: "pre_upgrade",
+      }),
+  }),
+);
 const logger = createJsonLogger();
 const jobs = new JobQueue(() => {
   const database = security.sqlite;
@@ -68,6 +89,47 @@ const worker = new JobWorker({
   },
 });
 worker.start();
+let shuttingDown = false;
+maintenance.registerGuard({
+  pause: () => worker.stopAndDrain(),
+  resume: () => {
+    if (!shuttingDown) worker.start();
+  },
+});
+const backups = new BackupService({
+  database: () => {
+    const database = security.encryptedDatabase;
+    if (!database) throw new Error("The encrypted workspace database is not available.");
+    return database;
+  },
+  dataDirectory: securityConfig.dataDirectory,
+  ...(securityConfig.backupDirectory
+    ? { configuredBackupDirectory: securityConfig.backupDirectory }
+    : {}),
+  applicationVersion: SPENDLENS_VERSION,
+  coordinator: maintenance,
+});
+const backupScheduler = securityConfig.backupDirectory
+  ? new BackupScheduler(
+      backups,
+      () => {
+        const database = security.sqlite;
+        const row = database
+          ?.prepare("SELECT timezone FROM workspaces LIMIT 1")
+          .get() as { timezone: string } | undefined;
+        return row?.timezone ?? "UTC";
+      },
+      (error) => {
+        logger.log({
+          timestamp: new Date().toISOString(),
+          level: "error",
+          event: "backup.schedule_failed",
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+      },
+    )
+  : null;
+backupScheduler?.start();
 const app = createApp({
   security,
   secureCookies: securityConfig.secureCookies,
@@ -76,6 +138,9 @@ const app = createApp({
   aiProviders,
   aiClassification,
   logger,
+  backups,
+  maintenance,
+  nextScheduledBackupAt: () => backupScheduler?.nextScheduledAt ?? null,
 });
 
 app.use("/*", serveStatic({ root: webRoot }));
@@ -109,6 +174,7 @@ server.on("error", (error) => {
 });
 
 function shutdown(signal: string) {
+  shuttingDown = true;
   logger.log({
     timestamp: new Date().toISOString(),
     level: "info",
@@ -116,6 +182,7 @@ function shutdown(signal: string) {
     signal,
   });
   worker.stop();
+  backupScheduler?.stop();
   server.close((error) => {
     security.close();
     if (error) {

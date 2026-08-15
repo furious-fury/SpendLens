@@ -12,6 +12,7 @@ import {
   type AnalyticsQuery,
   AnalyticsRegistrySchema,
   AnalyticsResultSchema,
+  BackupStatusSchema,
   type ApplyReviewDecision,
   apiPaths,
   type BulkTransactionEdit,
@@ -121,6 +122,37 @@ async function mutate<T>(
   });
 }
 
+async function downloadRequest(path: string, body: unknown): Promise<{ blob: Blob; filename: string }> {
+  const headers = new Headers({
+    accept: "application/vnd.spendlens.backup",
+    "content-type": "application/json",
+  });
+  const csrfToken = readCookie("spendlens_csrf");
+  if (csrfToken) headers.set("x-csrf-token", csrfToken);
+  const response = await fetch(path, {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers,
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    const result = SecurityErrorSchema.safeParse(await readJson(response));
+    if (result.success) {
+      throw new ApiError(
+        result.data.error.message,
+        result.data.error.code,
+        response.status,
+        result.data.error.retryAfterSeconds,
+        result.data.error.fields,
+      );
+    }
+    throw new ApiError(`Backup request failed with status ${response.status}.`, "BACKUP_FAILED", response.status);
+  }
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "spendlens-backup.slbackup";
+  return { blob: await response.blob(), filename };
+}
+
 export const api = {
   readiness(): Promise<ServiceHealth> {
     return request(apiPaths.ready, (value) => ServiceHealthSchema.parse(value));
@@ -159,6 +191,15 @@ export const api = {
       { password },
       (value) => RekeyResponseSchema.parse(value).recoveryKit,
     );
+  },
+  backupStatus() {
+    return request(apiPaths.backupStatus, (value) => BackupStatusSchema.parse(value));
+  },
+  createBackup(password: string) {
+    return downloadRequest(apiPaths.manualBackup, { password });
+  },
+  downloadBackup(backupId: string, password: string) {
+    return downloadRequest(apiPaths.downloadBackup(backupId), { password });
   },
   transactions(query: Partial<TransactionListQuery> = {}) {
     return request(withQuery(apiPaths.transactions, query), (value) =>

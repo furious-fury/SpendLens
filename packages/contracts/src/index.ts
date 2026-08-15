@@ -60,6 +60,74 @@ export const RecoveryKitSchema = z.object({
 
 export type RecoveryKit = z.infer<typeof RecoveryKitSchema>;
 
+export const BackupKindSchema = z.enum([
+  "manual",
+  "scheduled",
+  "safety",
+  "pre_restore",
+  "pre_rekey",
+  "pre_upgrade",
+]);
+export type BackupKind = z.infer<typeof BackupKindSchema>;
+
+export const BackupValidationSchema = z.enum(["pending", "valid", "failed"]);
+export type BackupValidation = z.infer<typeof BackupValidationSchema>;
+
+export const BackupManifestSchema = z.object({
+  type: z.literal("spendlens-backup"),
+  formatVersion: z.literal(1),
+  workspaceId: z.string().uuid(),
+  createdAt: z.string().datetime(),
+  applicationVersion: z.string().min(1).max(40),
+  schemaVersion: z.string().min(1).max(100),
+  latestMigrationId: z.string().min(1).max(100),
+  kind: BackupKindSchema,
+  payloadSize: z.number().int().positive(),
+  payloadSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  durableWorkspaceDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  exclusions: z.array(z.string().min(1).max(100)).max(20),
+  authenticationHmac: z.string().regex(/^[a-f0-9]{64}$/),
+});
+export type BackupManifest = z.infer<typeof BackupManifestSchema>;
+
+export const BackupRecordSchema = z.object({
+  id: z.string().uuid(),
+  kind: BackupKindSchema,
+  createdAt: z.string().datetime(),
+  completedAt: z.string().datetime().nullable(),
+  applicationVersion: z.string(),
+  schemaVersion: z.string(),
+  sizeBytes: z.number().int().nonnegative().nullable(),
+  validation: BackupValidationSchema,
+  availableForDownload: z.boolean(),
+  errorCode: z.string().nullable(),
+});
+export type BackupRecord = z.infer<typeof BackupRecordSchema>;
+
+export const BackupRetentionPolicySchema = z.object({
+  daily: z.literal(7),
+  weekly: z.literal(4),
+  monthly: z.literal(12),
+});
+export type BackupRetentionPolicy = z.infer<typeof BackupRetentionPolicySchema>;
+
+export const BackupStatusSchema = z.object({
+  scheduleEnabled: z.boolean(),
+  backupDirectoryConfigured: z.boolean(),
+  sameVolumeWarning: z.boolean(),
+  recoveryStorageVerified: z.literal(false),
+  lastSuccessfulAt: z.string().datetime().nullable(),
+  nextScheduledAt: z.string().datetime().nullable(),
+  retention: BackupRetentionPolicySchema,
+  items: z.array(BackupRecordSchema),
+});
+export type BackupStatus = z.infer<typeof BackupStatusSchema>;
+
+export const ManualBackupRequestSchema = z.object({
+  password: z.string().min(1).max(128),
+});
+export type ManualBackupRequest = z.infer<typeof ManualBackupRequestSchema>;
+
 export const SetupPreparedSchema = z.object({
   status: z.literal("recovery-required"),
   recoveryKit: RecoveryKitSchema,
@@ -1314,6 +1382,10 @@ export const apiPaths = {
   logoutAll: "/api/security/sessions/revoke",
   changePassword: "/api/security/password",
   rekey: "/api/security/database/rekey",
+  backupStatus: "/api/backups/status",
+  backups: "/api/backups",
+  manualBackup: "/api/backups/manual",
+  downloadBackup: (backupId: string) => `/api/backups/${backupId}/download`,
   openApi: "/api/openapi.json",
   job: (jobId: string) => `/api/jobs/${jobId}`,
   cancelJob: (jobId: string) => `/api/jobs/${jobId}/cancel`,

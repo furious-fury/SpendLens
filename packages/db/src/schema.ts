@@ -1003,6 +1003,55 @@ export const auditEvents = sqliteTable(
   ],
 );
 
+export const backupRecords = sqliteTable(
+  "backup_records",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text("kind", {
+      enum: ["manual", "scheduled", "safety", "pre_restore", "pre_rekey", "pre_upgrade"],
+    }).notNull(),
+    storagePath: text("storage_path"),
+    applicationVersion: text("application_version").notNull(),
+    schemaVersion: text("schema_version").notNull(),
+    payloadSha256: text("payload_sha256"),
+    durableWorkspaceDigest: text("durable_workspace_digest"),
+    sizeBytes: integer("size_bytes"),
+    validation: text("validation", { enum: ["pending", "valid", "failed"] })
+      .notNull()
+      .default("pending"),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("backup_records_workspace_time_idx").on(table.workspaceId, table.createdAt),
+    index("backup_records_retention_idx").on(table.kind, table.validation, table.createdAt),
+  ],
+);
+
+export const releaseState = sqliteTable("release_state", {
+  workspaceId: text("workspace_id")
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  applicationVersion: text("application_version").notNull(),
+  schemaVersion: text("schema_version").notNull(),
+  lastMigrationId: text("last_migration_id").notNull(),
+  lastMigrationCompatibility: text("last_migration_compatibility", {
+    enum: ["backward-compatible", "restore-required"],
+  }).notNull(),
+  lastMigrationPhase: text("last_migration_phase", {
+    enum: ["expand", "copy", "switch", "contract"],
+  }).notNull(),
+  migrationChecksums: text("migration_checksums").notNull(),
+  preUpgradeBackupId: text("pre_upgrade_backup_id").references(() => backupRecords.id, {
+    onDelete: "set null",
+  }),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 export const aiProviderSettings = sqliteTable(
   "ai_provider_settings",
   {
@@ -1136,6 +1185,8 @@ export const financialSchema = {
 export const infrastructureSchema = {
   jobs,
   auditEvents,
+  backupRecords,
+  releaseState,
 };
 
 export const databaseSchema = {
