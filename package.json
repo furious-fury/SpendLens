@@ -2,6 +2,7 @@
   "name": "spendlens",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Local-first financial statement intelligence",
   "packageManager": "pnpm@10.33.0",
   "engines": {

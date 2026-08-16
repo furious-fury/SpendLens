@@ -56,7 +56,7 @@ export function DashboardFilters({
         ? selectedAccounts[0]?.displayName
         : `${selectedAccounts.length} accounts`;
   const comparisonMode = value.comparison.mode;
-  const selectedRange = showRangePresets
+  const selectedRange: DateRangePreset | "custom" = showRangePresets
     ? customRangeOpen
       ? "custom"
       : rangePresetFor(value.startDate, value.endDate)
@@ -107,7 +107,7 @@ export function DashboardFilters({
               value={selectedRange}
               disabled={disabled}
               onChange={(event) => {
-                const preset = event.target.value as DateRangePreset;
+                const preset = event.target.value as DateRangePreset | "custom";
                 if (preset === "custom") {
                   setCustomRangeOpen(true);
                   return;

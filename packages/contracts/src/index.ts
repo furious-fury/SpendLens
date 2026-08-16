@@ -1107,6 +1107,19 @@ export const AiProviderInputSchema = AiProviderFieldsSchema.extend({
       message: "Review and acknowledge the remote payload policy before enabling this provider.",
     });
   }
+  if (value.localModel) {
+    const endpoint = new URL(value.endpoint);
+    if (
+      !["localhost", "127.0.0.1", "::1"].includes(endpoint.hostname.toLowerCase()) ||
+      !["http:", "https:"].includes(endpoint.protocol)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["endpoint"],
+        message: "Local model endpoints must use HTTP(S) on localhost or loopback.",
+      });
+    }
+  }
 });
 export type AiProviderInput = z.infer<typeof AiProviderInputSchema>;
 
