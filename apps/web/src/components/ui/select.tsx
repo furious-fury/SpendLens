@@ -197,14 +197,11 @@ function Select({
   className,
   defaultValue,
   disabled,
-  form,
   id,
-  name,
   onBlur,
   onChange,
   onFocus,
   onValueChange,
-  required,
   value,
 }: SelectProps) {
   const options = React.useMemo(() => optionList(children), [children]);
@@ -222,24 +219,23 @@ function Select({
     } as React.ChangeEvent<HTMLSelectElement>);
   }
 
+  const rootProps: React.ComponentProps<typeof SelectPrimitive.Root> = {
+    onValueChange: changeValue,
+  };
+  if (defaultValue !== undefined) rootProps.defaultValue = toRadixValue(defaultValue) ?? EMPTY_VALUE;
+  if (disabled !== undefined) rootProps.disabled = disabled;
+  if (value !== undefined) rootProps.value = toRadixValue(value) ?? EMPTY_VALUE;
+
   return (
-    <SelectRoot
-      defaultValue={toRadixValue(defaultValue)}
-      disabled={disabled}
-      form={form}
-      name={name}
-      onValueChange={changeValue}
-      required={required}
-      value={toRadixValue(value)}
-    >
+    <SelectRoot {...rootProps}>
       <SelectTrigger
         aria-describedby={ariaDescribedBy}
         aria-label={ariaLabel}
         aria-labelledby={ariaLabelledBy}
         className={className}
         id={id}
-        onBlur={onBlur as React.FocusEventHandler<HTMLButtonElement>}
-        onFocus={onFocus as React.FocusEventHandler<HTMLButtonElement>}
+        onBlur={onBlur as unknown as React.FocusEventHandler<HTMLButtonElement>}
+        onFocus={onFocus as unknown as React.FocusEventHandler<HTMLButtonElement>}
       >
         <SelectValue />
       </SelectTrigger>

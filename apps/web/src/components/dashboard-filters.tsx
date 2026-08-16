@@ -56,7 +56,7 @@ export function DashboardFilters({
         ? selectedAccounts[0]?.displayName
         : `${selectedAccounts.length} accounts`;
   const comparisonMode = value.comparison.mode;
-  const selectedRange = showRangePresets
+  const selectedRange: DateRangePreset | "custom" = showRangePresets
     ? customRangeOpen
       ? "custom"
       : rangePresetFor(value.startDate, value.endDate)
@@ -107,7 +107,7 @@ export function DashboardFilters({
               value={selectedRange}
               disabled={disabled}
               onChange={(event) => {
-                const preset = event.target.value as DateRangePreset;
+                const preset = event.target.value as DateRangePreset | "custom";
                 if (preset === "custom") {
                   setCustomRangeOpen(true);
                   return;
@@ -189,8 +189,8 @@ export function DashboardFilters({
 
         <FilterField label="Scope">
           <Select
-            value={value.scopes.length === 2 ? "all" : value.scopes[0]}
-            disabled={disabled}
+            value={value.scopes.length === 2 ? "all" : value.scopes[0] ?? ""}
+            disabled={disabled ?? false}
             onChange={(event) => setScope(event.target.value)}
             aria-label="Transaction scope"
           >
@@ -235,7 +235,7 @@ export function DashboardFilters({
             <DatePicker
               value={value.startDate}
               max={value.endDate}
-              disabled={disabled}
+              disabled={disabled ?? false}
               clearable={false}
               onChange={(startDate) => update({ startDate })}
               aria-label="Dashboard start date"
@@ -245,7 +245,7 @@ export function DashboardFilters({
             <DatePicker
               value={value.endDate}
               min={value.startDate}
-              disabled={disabled}
+              disabled={disabled ?? false}
               clearable={false}
               onChange={(endDate) => update({ endDate })}
               aria-label="Dashboard end date"
@@ -260,7 +260,7 @@ export function DashboardFilters({
             <DatePicker
               value={value.comparison.startDate}
               max={value.comparison.endDate}
-              disabled={disabled}
+              disabled={disabled ?? false}
               clearable={false}
               onChange={(startDate) => {
                 if (value.comparison.mode !== "custom") return;
@@ -278,7 +278,7 @@ export function DashboardFilters({
             <DatePicker
               value={value.comparison.endDate}
               min={value.comparison.startDate}
-              disabled={disabled}
+              disabled={disabled ?? false}
               clearable={false}
               onChange={(endDate) => {
                 if (value.comparison.mode !== "custom") return;

@@ -24,6 +24,7 @@ import type { AppEnv } from "../api/request-context.js";
 import type { AiClassificationService } from "./ai-classification-service.js";
 import { AiClassificationServiceError } from "./ai-classification-service.js";
 import { AiProviderError } from "./provider-adapters.js";
+import { AiRateLimiter } from "./ai-rate-limiter.js";
 
 export const AI_CLASSIFICATION_JOB_TYPE = "classification.ai";
 
@@ -32,6 +33,7 @@ export interface AiRoutesOptions {
   classification: AiClassificationService;
   jobs: JobQueue;
   audit: AuditLog;
+  rateLimiter?: AiRateLimiter;
 }
 
 const ProviderParamsSchema = z.object({
@@ -196,6 +198,7 @@ const activeClassificationJobRoute = createRoute({
 
 export function createAiRoutes(options: AiRoutesOptions) {
   const app = new OpenAPIHono<AppEnv>();
+  const rateLimiter = options.rateLimiter ?? new AiRateLimiter();
 
   app.openapi(listRoute, (context) => {
     const session = context.get("session");
@@ -299,6 +302,7 @@ export function createAiRoutes(options: AiRoutesOptions) {
 
   app.openapi(testRoute, async (context) => {
     const session = context.get("session");
+    enforceAiRateLimit(rateLimiter, session.workspaceId);
     try {
       return context.json(
         await options.classification.testConnection(
@@ -314,6 +318,7 @@ export function createAiRoutes(options: AiRoutesOptions) {
 
   app.openapi(modelsRoute, async (context) => {
     const session = context.get("session");
+    enforceAiRateLimit(rateLimiter, session.workspaceId);
     try {
       return context.json(
         {
@@ -333,6 +338,7 @@ export function createAiRoutes(options: AiRoutesOptions) {
   app.openapi(classificationJobRoute, (context) => {
     const session = context.get("session");
     const input = context.req.valid("json");
+    enforceAiRateLimit(rateLimiter, session.workspaceId, input.transactionIds.length);
     const setting = options.providers.get(session.workspaceId, input.providerSettingId);
     if (!setting) {
       throw mapAiError(
@@ -371,6 +377,19 @@ export function createAiRoutes(options: AiRoutesOptions) {
   });
 
   return app;
+}
+
+function enforceAiRateLimit(rateLimiter: AiRateLimiter, workspaceId: string, units = 1): void {
+  const result = rateLimiter.consume(workspaceId, units);
+  if (!result.allowed) {
+    throw new AppError(
+      "provider",
+      "AI_REQUEST_RATE_LIMITED",
+      "AI requests are temporarily rate-limited. Try again later.",
+      429,
+      { retryAfterSeconds: result.retryAfterSeconds, retryable: true },
+    );
+  }
 }
 
 function mapAiError(error: unknown): AppError {

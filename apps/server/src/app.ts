@@ -113,6 +113,13 @@ export function createApp(options: CreateAppOptions = {}) {
 
   app.use("*", requestTelemetry(logger));
   app.use("*", secureHeaders());
+  app.use("*", async (context, next) => {
+    context.header(
+      "Content-Security-Policy",
+      "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
+    );
+    await next();
+  });
   app.onError(errorHandler);
   app.notFound((context) =>
     errorHandler(

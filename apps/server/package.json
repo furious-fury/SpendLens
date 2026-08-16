@@ -2,6 +2,7 @@
   "name": "@spendlens/server",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "tsup src/index.ts src/security/security-cli.ts src/backups/backup-cli.ts --format esm --dts --clean",
@@ -23,9 +24,9 @@
     "@spendlens/contracts": "workspace:*",
     "@spendlens/db": "workspace:*",
     "argon2": "^0.44.0",
-    "drizzle-orm": "^0.44.7",
-    "hono": "^4.0.0",
-    "pdfjs-dist": "6.1.200"
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.34",
+    "pdfjs-dist": "^6.2.108"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
