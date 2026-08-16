@@ -76,17 +76,17 @@ function DatePicker({
       </PopoverTrigger>
       <PopoverContent align="start" className="w-auto p-0">
         <Calendar
-          defaultMonth={selected ?? maximumDate ?? undefined}
+          {...(selected ? { defaultMonth: selected } : maximumDate ? { defaultMonth: maximumDate } : {})}
           disabled={disabledDates}
-          endMonth={maximumDate}
+          {...(maximumDate ? { endMonth: maximumDate } : {})}
           mode="single"
           onSelect={(date) => {
             if (!date) return;
             onChange(serializeDate(date));
             setOpen(false);
           }}
-          selected={selected}
-          startMonth={minimumDate}
+          {...(selected ? { selected } : {})}
+          {...(minimumDate ? { startMonth: minimumDate } : {})}
         />
         {clearable && selected && (
           <div className="border-t border-border p-2">

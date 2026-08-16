@@ -189,8 +189,8 @@ export function DashboardFilters({
 
         <FilterField label="Scope">
           <Select
-            value={value.scopes.length === 2 ? "all" : value.scopes[0]}
-            disabled={disabled}
+            value={value.scopes.length === 2 ? "all" : value.scopes[0] ?? ""}
+            disabled={disabled ?? false}
             onChange={(event) => setScope(event.target.value)}
             aria-label="Transaction scope"
           >
@@ -235,7 +235,7 @@ export function DashboardFilters({
             <DatePicker
               value={value.startDate}
               max={value.endDate}
-              disabled={disabled}
+              disabled={disabled ?? false}
               clearable={false}
               onChange={(startDate) => update({ startDate })}
               aria-label="Dashboard start date"
@@ -245,7 +245,7 @@ export function DashboardFilters({
             <DatePicker
               value={value.endDate}
               min={value.startDate}
-              disabled={disabled}
+              disabled={disabled ?? false}
               clearable={false}
               onChange={(endDate) => update({ endDate })}
               aria-label="Dashboard end date"
@@ -260,7 +260,7 @@ export function DashboardFilters({
             <DatePicker
               value={value.comparison.startDate}
               max={value.comparison.endDate}
-              disabled={disabled}
+              disabled={disabled ?? false}
               clearable={false}
               onChange={(startDate) => {
                 if (value.comparison.mode !== "custom") return;
@@ -278,7 +278,7 @@ export function DashboardFilters({
             <DatePicker
               value={value.comparison.endDate}
               min={value.comparison.startDate}
-              disabled={disabled}
+              disabled={disabled ?? false}
               clearable={false}
               onChange={(endDate) => {
                 if (value.comparison.mode !== "custom") return;

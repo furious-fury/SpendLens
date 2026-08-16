@@ -537,7 +537,7 @@ function TransactionFilters({
         <FilterField label="From">
           <DatePicker
             value={search.start ?? ""}
-            max={search.end}
+            {...(search.end ? { max: search.end } : {})}
             onChange={(start) => onChange({ start: start || undefined })}
             aria-label="Transaction start date"
           />
@@ -545,7 +545,7 @@ function TransactionFilters({
         <FilterField label="To">
           <DatePicker
             value={search.end ?? ""}
-            min={search.start}
+            {...(search.start ? { min: search.start } : {})}
             onChange={(end) => onChange({ end: end || undefined })}
             aria-label="Transaction end date"
           />
